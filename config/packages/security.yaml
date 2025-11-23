@@ -1,0 +1,44 @@
+security:
+    password_hashers:
+        App\Entity\User:
+            algorithm: auto
+
+    providers:
+        app_user_provider:
+            entity:
+                class: App\Entity\User
+                property: email
+
+    firewalls:
+        dev:
+            pattern: ^/(_(profiler|wdt)|css|images|js)/
+            security: false
+
+        # 🔥 VERY IMPORTANT
+        # Let Flutter web send OPTIONS requests before JWT validation
+        preflight:
+            pattern: ^/api/
+            methods: [OPTIONS]
+            security: false
+
+        # Public API routes (login/register/test route)
+        login:
+            pattern: ^/api/(login|register|test)$
+            stateless: true
+            security: false
+
+        # All other API routes protected by JWT
+        api:
+            pattern: ^/api
+            stateless: true
+            jwt: ~
+
+    access_control:
+        - { path: ^/api/(login|register|test)$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/orders/notifications, roles: ROLE_CHEF }
+
+        - { path: ^/api/admin, roles: ROLE_ADMIN }
+        - { path: ^/api/orders, roles: [ROLE_CHEF, ROLE_CLIENT, ROLE_SERVEUR, ROLE_ADMIN] }
+      
+        # All other API routes require JWT
+        - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }

@@ -1,0 +1,55 @@
+# config/services.yaml
+
+parameters:
+    api_base_url: '%env(API_BASE_URL)%'
+    jwt_secret: '%env(JWT_SECRET)%'
+    jwt_public_key: '%env(JWT_PUBLIC_KEY)%'
+    jwt_private_key: '%env(JWT_PRIVATE_KEY)%'
+    jwt_pass_phrase: '%env(JWT_PASSPHRASE)%'
+
+services:
+    # Default configuration for services in this file
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        bind:
+            $apiBaseUrl: '%api_base_url%'
+
+    # Makes classes in src/ available to be used as services
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/Kernel.php'
+    App\Controller\Api\ApiAuthController:
+        arguments:
+            $jwtManager: '@lexik_jwt_authentication.jwt_manager'
+            $em: '@doctrine.orm.entity_manager'
+        tags: ['controller.service_arguments']
+
+    # Controllers
+    App\Controller\:
+        resource: '../src/Controller/'
+        tags: ['controller.service_arguments']
+
+    # API Controllers
+    App\Controller\Api\:
+        resource: '../src/Controller/Api/'
+        tags: ['controller.service_arguments']
+
+    # Services
+    App\Service\:
+        resource: '../src/Service/'
+        public: true
+
+    # Configuration pour OrderProcessor (API Platform)
+    App\State\OrderProcessor:
+        tags:
+            - { name: 'api_platform.state_processor', priority: 0 }
+            
+    App\Command\FixUserRolesCommand:
+        tags:
+            - { name: 'console.command', command: 'app:fix-user-roles' }
+  
+ 

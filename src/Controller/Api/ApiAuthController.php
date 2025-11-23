@@ -1,0 +1,760 @@
+<?php
+
+namespace App\Controller\Api;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
+use Doctrine\ORM\EntityManagerInterface;
+use App\Entity\User;
+use App\Entity\Order;
+use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
+use Symfony\Component\Security\Core\User\UserInterface;
+use App\Entity\OrderItem;
+use App\Entity\Product;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
+
+class ApiAuthController extends AbstractController
+{
+    private $jwtManager;
+    private $em;
+    private $tokenStorage;
+
+    public function __construct(
+        JWTTokenManagerInterface $jwtManager, 
+        EntityManagerInterface $em,
+        TokenStorageInterface $tokenStorage
+    ) {
+        $this->jwtManager = $jwtManager;
+        $this->em = $em;
+        $this->tokenStorage = $tokenStorage;
+    }
+
+    #[Route('/api/register', name: 'api_register', methods: ['POST', 'OPTIONS'])]
+    public function register(Request $request, UserPasswordHasherInterface $passwordHasher): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $data = $this->getRequestData($request);
+
+            if (!$data || !isset($data['email']) || !isset($data['password'])) {
+                return $this->jsonError('Email et mot de passe requis', 400);
+            }
+
+            $email = trim($data['email']);
+            $password = $data['password'];
+            $role = $data['role'] ?? 'ROLE_CLIENT';
+
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->jsonError('Email invalide', 400);
+            }
+
+            if (strlen($password) < 6) {
+                return $this->jsonError('Le mot de passe doit contenir au moins 6 caractères', 400);
+            }
+
+            $allowedRoles = ['ROLE_CLIENT', 'ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+            if (!in_array($role, $allowedRoles)) {
+                return $this->jsonError('Rôle invalide', 400);
+            }
+
+            $existingUser = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+            if ($existingUser) {
+                return $this->jsonError('Un utilisateur avec cet email existe déjà', 409);
+            }
+
+            $user = new User();
+            $user->setEmail($email);
+            $user->setPassword($passwordHasher->hashPassword($user, $password));
+            $user->setRoles([$role]);
+
+            $this->em->persist($user);
+            $this->em->flush();
+
+            $token = $this->jwtManager->create($user);
+
+            return $this->jsonSuccess([
+                'token' => $token,
+                'user' => [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'roles' => $user->getRoles()
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            error_log('Registration error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/login', name: 'api_login', methods: ['POST', 'OPTIONS'])]
+    public function login(Request $request, UserPasswordHasherInterface $passwordHasher): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $data = $this->getRequestData($request);
+
+            if (!$data || !isset($data['email']) || !isset($data['password'])) {
+                return $this->jsonError('Données invalides', 400);
+            }
+
+            $email = $data['email'];
+            $password = $data['password'];
+
+            $user = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+
+            if (!$user) {
+                return $this->jsonError('Email ou mot de passe incorrect', 401);
+            }
+
+            if (!$passwordHasher->isPasswordValid($user, $password)) {
+                return $this->jsonError('Email ou mot de passe incorrect', 401);
+            }
+
+            $token = $this->jwtManager->create($user);
+
+            return $this->jsonSuccess([
+                'token' => $token,
+                'user' => [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'roles' => $user->getRoles()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            error_log('Login error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur', 500);
+        }
+    }
+
+    #[Route('/api/admin/users', name: 'api_admin_users', methods: ['GET', 'OPTIONS'])]
+    public function getUsers(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            if (!in_array('ROLE_ADMIN', $user->getRoles())) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $users = $this->em->getRepository(User::class)->findAll();
+            $usersData = [];
+
+            foreach ($users as $user) {
+                $usersData[] = [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'roles' => $user->getRoles(),
+                ];
+            }
+
+            return $this->jsonSuccess(['users' => $usersData]);
+
+        } catch (\Exception $e) {
+            error_log('Get users error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/orders', name: 'api_orders', methods: ['GET', 'OPTIONS'])]
+    public function getOrders(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $userRoles = $user->getRoles();
+            $allowedRoles = ['ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+            
+            if (empty(array_intersect($userRoles, $allowedRoles))) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $orders = [
+                [
+                    'id' => 1,
+                    'client' => 'client1@example.com',
+                    'items' => ['Pizza Margherita', 'Coca-Cola'],
+                    'status' => 'en attente',
+                    'createdAt' => '2023-10-15 14:30:00'
+                ],
+                [
+                    'id' => 2,
+                    'client' => 'client2@example.com',
+                    'items' => ['Pasta Carbonara', 'Eau minérale'],
+                    'status' => 'en préparation',
+                    'createdAt' => '2023-10-15 15:15:00'
+                ]
+            ];
+
+            return $this->jsonSuccess(['orders' => $orders]);
+
+        } catch (\Exception $e) {
+            error_log('Get orders error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur', 500);
+        }
+    }
+
+    #[Route('/api/orderspayment', name: 'api_create_order_pay', methods: ['POST', 'OPTIONS'])]
+    public function createOrderPay(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            
+            if (!$user) {
+                $token = $this->tokenStorage->getToken();
+                if ($token) {
+                    $user = $token->getUser();
+                }
+                
+                if (!$user || $user === 'anon.' || is_string($user)) {
+                    return $this->jsonError('Non authentifié', 401);
+                }
+            }
+            
+            if (!$user instanceof User) {
+                return $this->jsonError('Utilisateur invalide', 401);
+            }
+
+            $data = $this->getRequestData($request);
+            
+            if (!isset($data['items']) || !is_array($data['items'])) {
+                return $this->jsonError('Données invalides: items requis et doivent être un tableau', 400);
+            }
+
+            if (empty($data['items'])) {
+                return $this->jsonError('Le panier est vide', 400);
+            }
+
+            $order = new Order();
+            $order->setUser($user);
+            $order->setStatus('pending');
+            $order->setCreatedAt(new \DateTime());
+            $order->setUpdatedAt(new \DateTime());
+
+            $total = 0;
+
+            foreach ($data['items'] as $itemIndex => $itemData) {
+                if (!isset($itemData['product_id']) || !isset($itemData['quantity'])) {
+                    return $this->jsonError("Données d'article invalides à l'index $itemIndex: product_id et quantity requis", 400);
+                }
+
+                $productId = $itemData['product_id'];
+                $quantity = $itemData['quantity'];
+
+                if (!is_numeric($productId) || $productId <= 0) {
+                    return $this->jsonError("Product_id invalide à l'index $itemIndex", 400);
+                }
+
+                if (!is_numeric($quantity) || $quantity <= 0) {
+                    return $this->jsonError("Quantity invalide à l'index $itemIndex", 400);
+                }
+
+                $product = $em->getRepository(Product::class)->find($productId);
+                if (!$product) {
+                    return $this->jsonError('Produit non trouvé: ' . $productId, 404);
+                }
+
+                $orderItem = new OrderItem();
+                $orderItem->setProduct($product);
+                $orderItem->setQuantity($quantity);
+                $orderItem->setOrder($order);
+                
+                $itemPrice = $product->getPrice() * $quantity;
+                $total += $itemPrice;
+
+                $em->persist($orderItem);
+            }
+
+            $order->setTotal($total);
+            $em->persist($order);
+            $em->flush();
+
+            return new JsonResponse([
+                'success' => true,
+                'order_id' => $order->getId(),
+                'status' => $order->getStatus(),
+                'total' => $total,
+                'message' => 'Commande créée avec succès'
+            ], 201, $this->getCorsHeaders());
+
+        } catch (\Exception $e) {
+            error_log('Create order error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+#[Route('/api/test', name: 'api_test', methods: ['GET', 'OPTIONS'])]
+public function test(Request $request): JsonResponse
+{
+    if ($request->getMethod() === 'OPTIONS') {
+        return new JsonResponse([], 200, $this->getCorsHeaders());
+    }
+
+    return new JsonResponse([
+        'success' => true,
+        'message' => 'API is working!',
+        'timestamp' => time()
+    ], 200, $this->getCorsHeaders());
+}
+
+    #[Route('/api/users/{email}', name: 'api_update_user', methods: ['PUT', 'OPTIONS'])]
+    public function updateUser(Request $request, string $email, UserPasswordHasherInterface $passwordHasher): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $currentUser = $this->getUser();
+            if (!$currentUser) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            if (!in_array('ROLE_ADMIN', $currentUser->getRoles())) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $user = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+            if (!$user) {
+                return $this->jsonError('Utilisateur non trouvé', 404);
+            }
+
+            $data = $this->getRequestData($request);
+
+            if (isset($data['email'])) {
+                $newEmail = trim($data['email']);
+                if (!filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
+                    return $this->jsonError('Email invalide', 400);
+                }
+
+                $existingUser = $this->em->getRepository(User::class)->findOneBy(['email' => $newEmail]);
+                if ($existingUser && $existingUser->getId() !== $user->getId()) {
+                    return $this->jsonError('Un utilisateur avec cet email existe déjà', 409);
+                }
+
+                $user->setEmail($newEmail);
+            }
+
+            if (isset($data['role'])) {
+                $allowedRoles = ['ROLE_CLIENT', 'ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+                if (!in_array($data['role'], $allowedRoles)) {
+                    return $this->jsonError('Rôle invalide', 400);
+                }
+                $user->setRoles([$data['role']]);
+            }
+
+            if (isset($data['password']) && !empty($data['password'])) {
+                if (strlen($data['password']) < 6) {
+                    return $this->jsonError('Le mot de passe doit contenir au moins 6 caractères', 400);
+                }
+                $user->setPassword($passwordHasher->hashPassword($user, $data['password']));
+            }
+
+            $this->em->flush();
+
+            return $this->jsonSuccess([
+                'message' => 'Utilisateur modifié avec succès',
+                'user' => [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'roles' => $user->getRoles()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            error_log('Update user error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/user/ordersUser', name: 'api_user_orders', methods: ['GET', 'OPTIONS'])]
+    public function getUserOrders(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $orders = $this->em->getRepository(Order::class)->findBy(['user' => $user], ['createdAt' => 'DESC']);
+            
+            $ordersData = [];
+            foreach ($orders as $order) {
+                $orderItems = [];
+                if (method_exists($order, 'getOrderItems')) {
+                    foreach ($order->getOrderItems() as $item) {
+                        $orderItems[] = [
+                            'name' => method_exists($item, 'getProduct') && $item->getProduct() ? 
+                                     $item->getProduct()->getName() : 'Produit inconnu',
+                            'quantity' => method_exists($item, 'getQuantity') ? $item->getQuantity() : 1,
+                            'price' => method_exists($item, 'getPrice') ? $item->getPrice() : 0
+                        ];
+                    }
+                }
+
+                $ordersData[] = [
+                    'id' => $order->getId(),
+                    'status' => $order->getStatus(),
+                    'total' => method_exists($order, 'getTotal') ? $order->getTotal() : 0,
+                    'orderItems' => $orderItems,
+                    'createdAt' => method_exists($order, 'getCreatedAt') && $order->getCreatedAt() ? 
+                                  $order->getCreatedAt()->format('Y-m-d H:i:s') : 'Date inconnue',
+                ];
+            }
+
+            return $this->jsonSuccess(['orders' => $ordersData]);
+
+        } catch (\Exception $e) {
+            error_log('Get user orders error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/admin/users/{email}', name: 'api_delete_user', methods: ['DELETE', 'OPTIONS'])]
+    public function deleteUser(Request $request, string $email): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $currentUser = $this->getUser();
+            if (!$currentUser) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            if (!in_array('ROLE_ADMIN', $currentUser->getRoles())) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $userToDelete = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+            
+            if (!$userToDelete) {
+                return $this->jsonError('Utilisateur non trouvé', 404);
+            }
+
+            $currentUserEmail = $currentUser->getUserIdentifier();
+            if ($currentUserEmail === $userToDelete->getEmail()) {
+                return $this->jsonError('Vous ne pouvez pas supprimer votre propre compte', 400);
+            }
+
+            $this->em->remove($userToDelete);
+            $this->em->flush();
+
+            return $this->jsonSuccess(['message' => 'Utilisateur supprimé avec succès']);
+
+        } catch (\Exception $e) {
+            error_log('Delete user error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/orders/{id}/status', name: 'api_update_order_status', methods: ['PUT', 'OPTIONS'])]
+    public function updateOrderStatus(Request $request, int $id): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $userRoles = $user->getRoles();
+            $allowedRoles = ['ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+            
+            if (empty(array_intersect($userRoles, $allowedRoles))) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $data = $this->getRequestData($request);
+            $status = $data['status'] ?? null;
+
+            if (!$status) {
+                return $this->jsonError('Statut requis', 400);
+            }
+
+            $allowedStatuses = ['pending', 'paid', 'cancelled', 'completed'];
+            
+            if (!in_array($status, $allowedStatuses)) {
+                return $this->jsonError('Statut invalide. Valeurs autorisées: ' . implode(', ', $allowedStatuses), 400);
+            }
+
+            $order = $this->em->getRepository(Order::class)->find($id);
+            
+            if (!$order) {
+                return $this->jsonError('Commande non trouvée', 404);
+            }
+            
+            $order->setStatus($status);
+            $order->setUpdatedAt(new \DateTime());
+            
+            $this->em->flush();
+
+            return $this->jsonSuccess([
+                'message' => 'Statut de la commande mis à jour',
+                'order_id' => $id,
+                'status' => $status,
+                'translated_status' => $this->translateStatus($status)
+            ]);
+
+        } catch (\Exception $e) {
+            error_log('Update order status error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    private function translateStatus(string $status): string
+    {
+        $statusMap = [
+            'pending' => 'en attente',
+            'paid' => 'payée',
+            'cancelled' => 'annulée',
+            'completed' => 'terminée'
+        ];
+        
+        return $statusMap[$status] ?? $status;
+    }
+
+    #[Route('/api/orders', name: 'api_create_order', methods: ['POST', 'OPTIONS'])]
+    public function createOrder(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $data = $this->getRequestData($request);
+            
+            if (!isset($data['items'])) {
+                return $this->jsonError('Données invalides: items requis', 400);
+            }
+
+            $order = new Order();
+            $order->setUser($user);
+            $order->setStatus('pending');
+            $order->setCreatedAt(new \DateTime());
+            $order->setUpdatedAt(new \DateTime());
+
+            foreach ($data['items'] as $itemData) {
+                if (!isset($itemData['product_id']) || !isset($itemData['quantity'])) {
+                    return $this->jsonError('Données d\'article invalides: product_id et quantity requis', 400);
+                }
+
+                $product = $em->getRepository(Product::class)->find($itemData['product_id']);
+                if (!$product) {
+                    return $this->jsonError('Produit non trouvé: ' . $itemData['product_id'], 404);
+                }
+
+                $orderItem = new OrderItem();
+                $orderItem->setProduct($product);
+                $orderItem->setQuantity($itemData['quantity']);
+                $orderItem->setOrder($order);
+
+                $em->persist($orderItem);
+            }
+
+            $em->persist($order);
+            $em->flush();
+
+            return $this->jsonSuccess([
+                'id' => $order->getId(),
+                'status' => $order->getStatus(),
+                'message' => 'Commande créée avec succès'
+            ], 201);
+
+        } catch (\Exception $e) {
+            error_log('Create order error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+#[Route('/api/orders/notifications', name: 'api_order_notifications', methods: ['GET', 'OPTIONS'])]
+public function getOrderNotifications(Request $request): JsonResponse
+{
+    if ($request->getMethod() === 'OPTIONS') {
+        return new JsonResponse([], 200, $this->getCorsHeaders());
+    }
+
+    try {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse([
+                'success' => false,
+                'error' => 'Non authentifié'
+            ], 401, $this->getCorsHeaders());
+        }
+
+        // Récupérer les commandes prêtes à être livrées
+        $orderRepository = $this->em->getRepository(Order::class);
+        
+        // Récupérer les commandes avec statut "prête" ou "ready"
+        $readyOrders = $orderRepository->createQueryBuilder('o')
+            ->where('o.status = :status1')
+            ->setParameter('status1', 'ready')
+            ->orWhere('o.status = :status2')
+            ->setParameter('status2', 'prête')
+            ->getQuery()
+            ->getResult();
+
+        $notifications = [];
+        foreach ($readyOrders as $order) {
+            $updatedAt = $order->getUpdatedAt() 
+                ? $order->getUpdatedAt()->format('Y-m-d H:i:s') 
+                : 'Date inconnue';
+                
+            $notifications[] = [
+                'id' => $order->getId(),
+                'message' => 'Commande #' . $order->getId() . ' est prête à être livrée',
+                'order_id' => $order->getId(),
+                'created_at' => $updatedAt,
+                'read' => false
+            ];
+        }
+
+        return new JsonResponse([
+            'success' => true,
+            'notifications' => $notifications
+        ], 200, $this->getCorsHeaders());
+
+    } catch (\Exception $e) {
+        error_log('Get notifications error: ' . $e->getMessage());
+        return new JsonResponse([
+            'success' => false,
+            'error' => 'Erreur serveur: ' . $e->getMessage()
+        ], 500, $this->getCorsHeaders());
+    }
+}
+    #[Route('/api/real-orders', name: 'api_real_orders', methods: ['GET', 'OPTIONS'])]
+    public function getRealOrders(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $userRoles = $user->getRoles();
+            $allowedRoles = ['ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+            
+            if (empty(array_intersect($userRoles, $allowedRoles))) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $orders = $this->em->getRepository(Order::class)->findAll();
+            $ordersData = [];
+
+            foreach ($orders as $order) {
+                $orderItems = [];
+                if (method_exists($order, 'getOrderItems')) {
+                    foreach ($order->getOrderItems() as $item) {
+                        $orderItems[] = [
+                            'name' => method_exists($item, 'getProduct') && $item->getProduct() ? $item->getProduct()->getName() : 'Produit inconnu',
+                            'quantity' => method_exists($item, 'getQuantity') ? $item->getQuantity() : 1,
+                            'price' => method_exists($item, 'getPrice') ? $item->getPrice() : 0
+                        ];
+                    }
+                }
+
+                $ordersData[] = [
+                    'id' => $order->getId(),
+                    'status' => $this->translateStatus($order->getStatus()),
+                    'total' => method_exists($order, 'getTotal') ? $order->getTotal() : 0,
+                    'user' => method_exists($order, 'getUser') && $order->getUser() ? $order->getUser()->getUserIdentifier() : 'Utilisateur inconnu',
+                    'orderItems' => $orderItems,
+                    'createdAt' => method_exists($order, 'getCreatedAt') && $order->getCreatedAt() ? $order->getCreatedAt()->format('Y-m-d H:i:s') : 'Date inconnue',
+                    'updatedAt' => method_exists($order, 'getUpdatedAt') && $order->getUpdatedAt() ? $order->getUpdatedAt()->format('Y-m-d H:i:s') : null
+                ];
+            }
+
+            return $this->jsonSuccess(['orders' => $ordersData]);
+
+        } catch (\Exception $e) {
+            error_log('Get real orders error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    // ===== HELPER METHODS =====
+
+    private function getRequestData(Request $request): array
+    {
+        if (0 === strpos($request->headers->get('Content-Type'), 'application/json')) {
+            $data = json_decode($request->getContent(), true);
+            return is_array($data) ? $data : [];
+        }
+        return $request->request->all();
+    }
+
+   private function getCorsHeaders(): array
+{
+    return [
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers' => 'Content-Type, Authorization, Accept, X-Requested-With, ngrok-skip-browser-warning',
+        'Access-Control-Allow-Credentials' => 'true',
+        'Access-Control-Max-Age' => '3600',
+    ];
+}
+
+    private function jsonSuccess($data, int $status = 200): JsonResponse
+    {
+        return new JsonResponse([
+            'success' => true,
+            'data' => $data
+        ], $status, array_merge($this->getCorsHeaders(), [
+            'Content-Type' => 'application/json'
+        ]));
+    }
+
+    private function jsonError(string $message, int $status = 400): JsonResponse
+    {
+        return new JsonResponse([
+            'success' => false,
+            'error' => $message
+        ], $status, $this->getCorsHeaders());
+    }
+}
