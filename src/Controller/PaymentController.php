@@ -3,6 +3,8 @@
 namespace App\Controller;
 
 use App\Service\PaymentService;
+use App\Entity\Order;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -17,15 +19,18 @@ class PaymentController extends AbstractController
     private PaymentService $paymentService;
     private SerializerInterface $serializer;
     private ValidatorInterface $validator;
+    private EntityManagerInterface $em;
 
     public function __construct(
         PaymentService $paymentService,
         SerializerInterface $serializer,
-        ValidatorInterface $validator
+        ValidatorInterface $validator,
+        EntityManagerInterface $em
     ) {
         $this->paymentService = $paymentService;
         $this->serializer = $serializer;
         $this->validator = $validator;
+        $this->em = $em;
     }
 
     #[Route('/process', name: 'api_payment_process', methods: ['POST', 'OPTIONS'])]
@@ -166,5 +171,87 @@ class PaymentController extends AbstractController
         ], Response::HTTP_OK, [
             'Access-Control-Allow-Origin' => '*',
         ]);
+    }
+
+    #[Route('/d17/initiate', name: 'api_payment_d17_initiate', methods: ['POST', 'OPTIONS'])]
+    public function initiateD17(Request $request): JsonResponse
+    {
+        // Handle preflight OPTIONS request
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse([], 200, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization, X-Requested-With',
+            ]);
+        }
+
+        try {
+            $content = $request->getContent();
+            error_log('D17 initiate request: ' . $content);
+            $data = json_decode($content, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return new JsonResponse([
+                    'status' => 'error',
+                    'message' => 'Invalid JSON: ' . json_last_error_msg()
+                ], Response::HTTP_BAD_REQUEST, [
+                    'Access-Control-Allow-Origin' => '*',
+                ]);
+            }
+
+            if (empty($data['order_id'])) {
+                return new JsonResponse([
+                    'status' => 'error',
+                    'message' => 'Missing order_id'
+                ], Response::HTTP_BAD_REQUEST, [
+                    'Access-Control-Allow-Origin' => '*',
+                ]);
+            }
+
+            // Use the server-side order total as the authoritative amount to avoid
+            // client/server mismatches (client may compute totals differently).
+            $order = $this->em->getRepository(Order::class)->find($data['order_id']);
+            if (!$order) {
+                return new JsonResponse([
+                    'status' => 'error',
+                    'message' => 'Order not found'
+                ], Response::HTTP_NOT_FOUND, [
+                    'Access-Control-Allow-Origin' => '*',
+                ]);
+            }
+
+            $serverAmount = $order->getTotal();
+
+            $result = $this->paymentService->processPayment([
+                'order_id' => $data['order_id'],
+                'amount' => $serverAmount
+            ]);
+
+            return new JsonResponse([
+                'success' => true,
+                'status' => 'success',
+                'message' => 'D17 payment simulated and completed',
+                'data' => $result
+            ], Response::HTTP_OK, [
+                'Access-Control-Allow-Origin' => '*',
+            ]);
+
+        } catch (\InvalidArgumentException $e) {
+            error_log('D17 payment validation error: ' . $e->getMessage());
+            return new JsonResponse([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], Response::HTTP_BAD_REQUEST, [
+                'Access-Control-Allow-Origin' => '*',
+            ]);
+        } catch (\Exception $e) {
+            error_log('D17 payment error: ' . $e->getMessage());
+            return new JsonResponse([
+                'status' => 'error',
+                'message' => 'Failed to initiate D17 payment: ' . $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR, [
+                'Access-Control-Allow-Origin' => '*',
+            ]);
+        }
     }
 }

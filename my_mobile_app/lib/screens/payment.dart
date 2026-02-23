@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/scheduler.dart' show timeDilation;
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cart_provider.dart';
 
@@ -16,673 +15,797 @@ class PaymentScreen extends StatefulWidget {
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
-class _PaymentScreenState extends State<PaymentScreen>
-    with SingleTickerProviderStateMixin {
+class _PaymentScreenState extends State<PaymentScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _cardNumberController = TextEditingController();
   final TextEditingController _cardHolderController = TextEditingController();
   final TextEditingController _expiryController = TextEditingController();
   final TextEditingController _cvvController = TextEditingController();
-  bool _isProcessing = false;
-  String? localToken;
-  String selectedCardType = '';
+  final TextEditingController _tableNumberController = TextEditingController();
 
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<Offset> _slideAnimation;
+  bool _isProcessing = false;
+  bool isD17Card = false;
+  String? paymentUrl;
+  bool showExternalPayment = false;
+
+  // Liste des préfixes des cartes D17 (à ajuster selon les vrais préfixes)
+  final List<String> _d17Prefixes = [
+    '603747', // Carte D17 classique
+    '589206', // Carte D17
+    '6042',   // Carte électron D17
+    '627414', // Autre carte D17
+    '639388', // Carte D17
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadToken();
-    
-    // Configuration des animations
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
-      ),
-    );
-    
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.3, 0.8, curve: Curves.elasticOut),
-      ),
-    );
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-      ),
-    );
-    
-    _animationController.forward();
-    timeDilation = 1.5;
+    // Ajouter un listener pour détecter automatiquement quand on colle un numéro
+    _cardNumberController.addListener(_detectD17Card);
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
-    timeDilation = 1.0;
+    _cardNumberController.removeListener(_detectD17Card);
+    _cardNumberController.dispose();
+    _cardHolderController.dispose();
+    _expiryController.dispose();
+    _cvvController.dispose();
+    _tableNumberController.dispose();
     super.dispose();
   }
 
-  Widget _build3DText(String text, {double fontSize = 24, Color color = Colors.white, Color shadowColor = Colors.black}) {
-    return Stack(
-      children: [
-        // Ombre portée pour effet 3D
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 3
-              ..color = shadowColor,
-            shadows: [
-              BoxShadow(
-                blurRadius: 10,
-                color: shadowColor,
-                offset: const Offset(2, 2),
-              ),
-            ],
-          ),
-        ),
-        // Texte principal
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            color: color,
-            shadows: [
-              BoxShadow(
-                blurRadius: 20,
-                color: color,
-                offset: const Offset(0, 0),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _loadToken() async {
+  Future<int> _createOrder() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      localToken = prefs.getString('token');
-      setState((){});
+      final cartProvider = context.read<CartProvider>();
+      final cartItems = cartProvider.items;
+      final authProvider = context.read<AuthProvider>();
+
+      final token = authProvider.token;
+      if (token == null || token.isEmpty) throw Exception('Token manquant');
+
+      final orderData = {
+        'items': cartItems.map((i) => {
+              'product_id': int.tryParse(i.id) ?? 0,
+              'quantity': i.quantity,
+            }).toList(),
+        // table number is required and sent as integer
+        'table_number': int.tryParse(_tableNumberController.text.trim()) ?? 0,
+      };
+
+      debugPrint('📦 Création commande...');
+      final res = await http.post(
+        Uri.parse('${AuthProvider.baseUrl}/orderspayment'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode(orderData),
+      ).timeout(const Duration(seconds: 30));
+
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw Exception('Erreur: ${res.statusCode}');
+      }
+
+      final data = json.decode(res.body);
+      final orderId = data['order_id'] ?? 0;
+      if (orderId <= 0) throw Exception('ID invalide');
+
+      return orderId;
     } catch (e) {
-      debugPrint('Error loading token: $e');
-    }
-  }
-
-  Future<String?> _getEffectiveToken(AuthProvider authProvider) async {
-    if (authProvider.token != null && authProvider.token!.isNotEmpty) {
-      return authProvider.token;
-    }
-    
-    if (localToken != null && localToken!.isNotEmpty) {
-      return localToken;
-    }
-    
-    await _loadToken();
-    return localToken;
-  }
-
-Future<int> _createOrder() async {
-  try {
-    final cartProvider = context.read<CartProvider>();
-    final cartItems = cartProvider.items;
-    final authProvider = context.read<AuthProvider>();
-    
-    final effectiveToken = await _getEffectiveToken(authProvider);
-    
-    if (effectiveToken == null || effectiveToken.isEmpty) {
-      throw Exception('Token non disponible');
-    }
-    
-    final headers = {
-      'Content-Type': 'application/json; charset=UTF-8', 
-      'Accept': 'application/json', 
-      'Authorization': 'Bearer $effectiveToken' // Make sure this is included
-    };
-    
-    // DON'T send user_id - let Symfony get it from the token
-    final orderData = {
-      'items': cartItems.map((i) => {
-        'product_id': int.tryParse(i.id) ?? 0,
-        'quantity': i.quantity,
-      }).toList(),
-    };
-    
-    debugPrint('Creating order with data: ${json.encode(orderData)}');
-    
-    // Make sure you're calling the correct endpoint
-    final res = await http.post(
-      Uri.parse('https://1cc7227c8427.ngrok-free.app/api/orderspayment'), 
-      headers: headers, 
-      body: json.encode(orderData)
-    );
-    debugPrint('Order creation response: ${res.statusCode} ${res.body}');
-    
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('Échec de création de commande: ${res.statusCode} ${res.body}');
-    }
-    
-    final responseData = json.decode(res.body);
-    
-    final dynamic orderIdValue = responseData['order_id'];
-    final int orderId;
-    
-    if (orderIdValue is int) {
-      orderId = orderIdValue;
-    } else if (orderIdValue is String) {
-      orderId = int.tryParse(orderIdValue) ?? 0;
-    } else {
-      debugPrint('Invalid order_id type: ${orderIdValue.runtimeType}');
-      debugPrint('Full response: ${res.body}');
-      throw Exception('Format de réponse invalide: id manquant ou incorrect');
-    }
-    
-    if (orderId <= 0) {
-      throw Exception('ID de commande invalide');
-    }
-    
-    cartProvider.clear();
-    return orderId;
-    
-  } catch (e) {
-    debugPrint('Error creating order: $e');
-    rethrow;
-  }
-}
-
-  Future<void> _processPayment() async {
-    if (!_formKey.currentState!.validate()) return;
-    
-    setState(() => _isProcessing = true);
-    final auth = context.read<AuthProvider>();
-    
-    final effectiveToken = await _getEffectiveToken(auth);
-
-    if (effectiveToken == null || effectiveToken.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Session expirée. Reconnectez-vous.'), 
-            backgroundColor: Colors.red
-          )
-        );
-        setState(() => _isProcessing = false);
-      }
-      return;
-    }
-
-    if (mounted) {
-      showDialog(
-        context: context, 
-        barrierDismissible: false, 
-        builder: (_) => Dialog(
-          backgroundColor: Colors.transparent, 
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.amber),
-              ),
-              child: const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Colors.amber)),
-                  SizedBox(height: 16),
-                  Text('Traitement du paiement...', style: TextStyle(color: Colors.white)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    try {
-      final orderId = await _createOrder();
-      
-      if (orderId <= 0) {
-        throw Exception('ID de commande invalide');
-      }
-      
-      await _updateOrderStatus(orderId, 'paid', effectiveToken);
-      
-      if (mounted) {
-        Navigator.of(context).pop();
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => OrderConfirmationScreen(orderId: orderId),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: ${e.toString()}'), 
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          )
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
+      debugPrint('❌ Erreur création: $e');
+      rethrow;
     }
   }
 
   Future<void> _updateOrderStatus(int orderId, String status, String token) async {
     try {
-      if (orderId <= 0) {
-        throw Exception('ID de commande invalide pour la mise à jour du statut');
-      }
-      
-      final headers = {
-        'Content-Type': 'application/json; charset=UTF-8', 
-        'Accept': 'application/json', 
-        'Authorization': 'Bearer $token'
-      };
-      
-      final statusData = {
-        'status': status
-      };
-      
       final res = await http.patch(
-        Uri.parse('https://1cc7227c8427.ngrok-free.app/api/orders/$orderId/status'), 
-        headers: headers, 
-        body: json.encode(statusData)
-      );
-      
-      debugPrint('Order status update response: ${res.statusCode} ${res.body}');
-      
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw Exception('Échec de mise à jour du statut: ${res.statusCode} ${res.body}');
-      }
-      
-      debugPrint('Order status updated to $status');
-      
+        Uri.parse('${AuthProvider.baseUrl}/orders/$orderId/status'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({'status': status}),
+      ).timeout(const Duration(seconds: 30));
+
+      if (res.statusCode >= 400) throw Exception('Erreur: ${res.statusCode}');
     } catch (e) {
-      debugPrint('Error updating order status: $e');
+      debugPrint('❌ Erreur status: $e');
       rethrow;
     }
   }
 
-  void _detectCardType(String number) {
-    final cleaned = number.replaceAll(' ', '');
-    if (cleaned.startsWith('4')) {
-      setState(() => selectedCardType = 'Visa');
-    } else if (cleaned.startsWith('5')) {
-      setState(() => selectedCardType = 'MasterCard');
-    } else if (cleaned.startsWith('34') || cleaned.startsWith('37')) {
-      setState(() => selectedCardType = 'American Express');
-    } else if (cleaned.startsWith('6')) {
-      setState(() => selectedCardType = 'Discover');
-    } else {
-      setState(() => selectedCardType = '');
+  Future<void> _initiateD17Payment(int orderId, String token) async {
+    try {
+      final paymentData = {
+        'order_id': orderId,
+        'amount': widget.totalAmount,
+        'card_number': _cardNumberController.text.replaceAll(' ', ''),
+        'card_holder': _cardHolderController.text,
+        'expiry_date': _expiryController.text,
+        'cvv': _cvvController.text,
+      };
+
+      final response = await http.post(
+        Uri.parse('${AuthProvider.baseUrl}/payment/d17/initiate'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode(paymentData),
+      ).timeout(const Duration(seconds: 30));
+
+      debugPrint('D17 payment response: ${response.statusCode} ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        if (data['payment_url'] != null) {
+          final url = Uri.parse(data['payment_url']);
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+            await Future.delayed(const Duration(seconds: 5));
+            await _checkPaymentStatus(orderId, token);
+          } else {
+            throw Exception('Impossible d\'ouvrir l\'URL de paiement');
+          }
+        } else if (data['success'] == true) {
+          await _updateOrderStatus(orderId, 'paid', token);
+          await _finalizePayment(orderId, token);
+        } else {
+          throw Exception(data['message'] ?? 'Échec du paiement D17');
+        }
+      } else {
+        throw Exception('Erreur de paiement: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error initiating D17 payment: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _checkPaymentStatus(int orderId, String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AuthProvider.baseUrl}/orders/$orderId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'paid') {
+          await _updateOrderStatus(orderId, 'paid', token);
+          await _finalizePayment(orderId, token);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('En attente de confirmation du paiement...'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking payment status: $e');
+    }
+  }
+
+  Future<void> _finalizePayment(int orderId, String token) async {
+    try {
+      context.read<CartProvider>().clear();
+
+      if (!mounted) return;
+      
+      Navigator.pop(context);
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OrderConfirmationScreen(orderId: orderId, isD17Card: isD17Card),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error finalizing payment: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _processPayment() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isProcessing = true);
+    final auth = context.read<AuthProvider>();
+
+    if (auth.token == null || auth.token!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ Session expirée'), backgroundColor: Colors.red),
+      );
+      setState(() => _isProcessing = false);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isD17Card) ...[
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: Image.network(
+                      'https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Logo-poste-tunisienne.jpg/800px-Logo-poste-tunisienne.jpg',
+                      height: 60,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.local_post_office, color: Colors.green, size: 50),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Colors.amber)),
+                const SizedBox(height: 16),
+                Text(
+                  isD17Card ? '⏳ Redirection vers le paiement sécurisé D17...' : '⏳ Traitement du paiement...',
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final orderId = await _createOrder();
+      
+      if (isD17Card) {
+        await _initiateD17Payment(orderId, auth.token!);
+      } else {
+        await _updateOrderStatus(orderId, 'paid', auth.token!);
+        await _finalizePayment(orderId, auth.token!);
+      }
+      
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ ${e.toString()}'), backgroundColor: Colors.red),
+        );
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  void _detectD17Card() {
+    final number = _cardNumberController.text.replaceAll(' ', '');
+    bool detected = false;
+    
+    for (String prefix in _d17Prefixes) {
+      if (number.startsWith(prefix)) {
+        detected = true;
+        break;
+      }
+    }
+    
+    // Pour la démonstration, on peut aussi détecter avec un numéro factice
+    // À enlever en production
+    if (number == '1234567899999999') {
+      detected = true;
+    }
+    
+    if (mounted && detected != isD17Card) {
+      setState(() {
+        isD17Card = detected;
+      });
     }
   }
 
   String? _validateExpiryDate(String? value) {
-    if (value == null || value.isEmpty) return 'Veuillez entrer la date';
-    if (value.length < 5) return 'Format: MM/AA';
+    if (value == null || value.isEmpty) return 'Requis';
+    if (value.length < 5) return 'Format MM/AA';
+    
     final parts = value.split('/');
-    if (parts.length != 2) return 'Format: MM/AA';
+    if (parts.length != 2) return 'Format MM/AA';
+    
     final month = int.tryParse(parts[0]) ?? 0;
     final year = int.tryParse(parts[1]) ?? 0;
+    
     if (month < 1 || month > 12) return 'Mois invalide';
+    
     final now = DateTime.now();
     final currentYear = now.year % 100;
     final currentMonth = now.month;
+    
     if (year < currentYear || (year == currentYear && month < currentMonth)) {
       return 'Carte expirée';
     }
+    
     return null;
-  }
-
-  Widget _buildCardIcon(String type) {
-    switch (type) {
-      case 'Visa':
-        return const Icon(Icons.credit_card, color: Colors.blue, size: 24);
-      case 'MasterCard':
-        return const Icon(Icons.credit_card, color: Colors.orange, size: 24);
-      case 'American Express':
-        return const Icon(Icons.credit_card, color: Colors.green, size: 24);
-      case 'Discover':
-        return const Icon(Icons.credit_card, color: Colors.purple, size: 24);
-      default:
-        return const Icon(Icons.credit_card, color: Colors.grey, size: 24);
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Row(
+          children: [
+            if (isD17Card) 
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.green,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(Icons.local_post_office, color: Colors.white, size: 20),
+              ),
+            const SizedBox(width: 8),
+            Text(
+              isD17Card ? 'Paiement D17' : 'Paiement Sécurisé',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
         elevation: 0,
-        foregroundColor: Colors.amber,
-        title: const Text('Paiement Sécurisé'),
       ),
-      body: Stack(
-        children: [
-          // Background avec effet de profondeur
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: NetworkImage(
-                  'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80',
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Carte de montant avec logo D17 si détecté
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isD17Card 
+                        ? [Colors.green.shade900, Colors.green.shade700]
+                        : [Colors.amber.shade900, Colors.amber.shade700],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isD17Card ? Colors.green : Colors.amber).withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(
-                  Colors.black,
-                  BlendMode.darken,
-                ),
-              ),
-            ),
-          ),
-          
-          // Overlay de dégradé
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black,
-                  Colors.black,
-                  Colors.black,
-                ],
-              ),
-            ),
-          ),
-          
-          // Contenu principal
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: SlideTransition(
-              position: _slideAnimation,
-              child: FadeTransition(
-                opacity: _fadeAnimation,
-                child: ScaleTransition(
-                  scale: _scaleAnimation,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, 
-                    children: [
-                      // Montant total avec effet 3D
-                      Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.amber),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.amber,
-                              blurRadius: 20,
-                              spreadRadius: 2,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Montant total',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
                         ),
-                        child: Column(
-                          children: [
-                            const Text(
-                              'Montant Total', 
-                              style: TextStyle(fontSize: 18, color: Colors.white70)
-                            ),
-                            const SizedBox(height: 10),
-                            _build3DText(
-                              '${widget.totalAmount.toStringAsFixed(2)} DT',
-                              fontSize: 32,
-                              color: Colors.amber,
-                              shadowColor: Colors.orange,
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 30),
-                      
-                      // Titre avec effet 3D
-                      _build3DText(
-                        'Informations de Carte Bancaire', 
-                        fontSize: 20,
-                        color: Colors.white,
-                        shadowColor: Colors.black,
-                      ),
-                      
-                      const SizedBox(height: 20),
-                      
-                      // Formulaire de paiement
-                      Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.amber),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.amber,
-                              blurRadius: 15,
-                              spreadRadius: 2,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Form(
-                          key: _formKey,
-                          child: Column(
-                            children: [
-                              // Numéro de carte avec détection de type
-                              TextFormField(
-                                controller: _cardNumberController,
-                                decoration: InputDecoration(
-                                  labelText: 'Numéro de Carte',
-                                  labelStyle: const TextStyle(color: Colors.white70),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.black,
-                                  prefixIcon: const Icon(Icons.credit_card, color: Colors.amber),
-                                  suffixIcon: selectedCardType.isNotEmpty 
-                                    ? _buildCardIcon(selectedCardType)
-                                    : null,
-                                ),
-                                style: const TextStyle(color: Colors.white),
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly, 
-                                  LengthLimitingTextInputFormatter(19), 
-                                  _CardNumberInputFormatter()
-                                ],
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) return 'Veuillez entrer un numéro de carte';
-                                  final cleanedValue = value.replaceAll(' ', '');
-                                  if (cleanedValue.length < 16) return 'Le numéro de carte doit avoir 16 chiffres';
-                                  return null;
-                                },
-                                onChanged: _detectCardType,
-                              ),
-                              
-                              const SizedBox(height: 20),
-                              
-                              // Titulaire de la carte
-                              TextFormField(
-                                controller: _cardHolderController,
-                                decoration: InputDecoration(
-                                  labelText: 'Titulaire de la Carte',
-                                  labelStyle: const TextStyle(color: Colors.white70),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: Colors.amber),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.black,
-                                  prefixIcon: const Icon(Icons.person, color: Colors.amber),
-                                ),
-                                style: const TextStyle(color: Colors.white),
-                                validator: (v) => (v == null || v.isEmpty) ? 'Veuillez entrer le nom du titulaire' : null,
-                              ),
-                              
-                              const SizedBox(height: 20),
-                              
-                              // Date d'expiration et CVV
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _expiryController,
-                                      decoration: InputDecoration(
-                                        labelText: 'Date d\'Expiration (MM/AA)',
-                                        labelStyle: const TextStyle(color: Colors.white70),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        filled: true,
-                                        fillColor: Colors.black,
-                                        prefixIcon: const Icon(Icons.calendar_today, color: Colors.amber),
-                                      ),
-                                      style: const TextStyle(color: Colors.white),
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly, 
-                                        LengthLimitingTextInputFormatter(4), 
-                                        _CardExpiryInputFormatter()
-                                      ],
-                                      validator: _validateExpiryDate,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 20),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _cvvController,
-                                      decoration: InputDecoration(
-                                        labelText: 'CVV',
-                                        labelStyle: const TextStyle(color: Colors.white70),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Colors.amber),
-                                        ),
-                                        filled: true,
-                                        fillColor: Colors.black,
-                                        prefixIcon: const Icon(Icons.lock, color: Colors.amber),
-                                      ),
-                                      style: const TextStyle(color: Colors.white),
-                                      keyboardType: TextInputType.number,
-                                      obscureText: true,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly, 
-                                        LengthLimitingTextInputFormatter(3)
-                                      ],
-                                      validator: (v) => (v == null || v.length < 3) ? 'Le CVV doit avoir 3 chiffres' : null,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              
-                              const SizedBox(height: 30),
-                              
-                              // Bouton de paiement
-                              SizedBox(
-                                width: double.infinity,
-                                height: 56,
-                                child: _isProcessing 
-                                  ? const Center(
-                                      child: CircularProgressIndicator(
-                                        valueColor: AlwaysStoppedAnimation(Colors.amber),
-                                      ),
-                                    )
-                                  : ElevatedButton(
-                                      onPressed: _processPayment,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.amber,
-                                        foregroundColor: Colors.black,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        elevation: 8,
-                                        shadowColor: Colors.amber,
-                                        textStyle: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      child: const Text('Payer Maintenant'),
-                                    ),
-                              ),
-                            ],
+                        const SizedBox(height: 8),
+                        Text(
+                          '${widget.totalAmount.toStringAsFixed(2)} DT',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
                           ),
+                        ),
+                      ],
+                    ),
+                    if (isD17Card)
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Image.network(
+                          'https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Logo-poste-tunisienne.jpg/800px-Logo-poste-tunisienne.jpg',
+                          height: 40,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.local_post_office, 
+                            color: Colors.green, 
+                            size: 40,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+
+              // Bannière D17 si détecté
+              if (isD17Card)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green, width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.local_post_office, color: Colors.white, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Carte D17 détectée',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Paiement sécurisé via La Poste Tunisienne',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
+
+              const Text('Numéro de carte',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _cardNumberController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: '1234 5678 9012 3456',
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  prefixIcon: Container(
+                    margin: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isD17Card ? Colors.green.withOpacity(0.2) : Colors.amber.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      isD17Card ? Icons.local_post_office : Icons.credit_card,
+                      color: isD17Card ? Colors.green : Colors.amber,
+                      size: 20,
+                    ),
+                  ),
+                  suffixIcon: isD17Card
+                      ? Container(
+                          margin: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'D17',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        )
+                      : null,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green.withOpacity(0.3) : Colors.white12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF1A1A1A),
+                ),
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(16),
+                  _CardNumberInputFormatter(),
+                ],
+                validator: (v) {
+                  final cleaned = v?.replaceAll(' ', '') ?? '';
+                  if (cleaned.length != 16) return '16 chiffres requis';
+                  return null;
+                },
               ),
-            ),
+
+              const SizedBox(height: 16),
+
+              // Table number input
+              const Text('Numéro de table (optionnel)',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _tableNumberController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: 'Ex: 12',
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  prefixIcon: Icon(Icons.table_restaurant, color: isD17Card ? Colors.green : Colors.amber),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green.withOpacity(0.3) : Colors.white12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF1A1A1A),
+                ),
+                style: const TextStyle(color: Colors.white),
+                validator: (v) {
+                  // Table number is REQUIRED
+                  if (v == null || v.isEmpty) return 'Numéro de table requis';
+                  if (int.tryParse(v) == null) return 'Numéro invalide';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
+              const Text('Titulaire de la carte',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _cardHolderController,
+                decoration: InputDecoration(
+                  hintText: 'BALKIS TRABELSI',
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  prefixIcon: Icon(
+                    Icons.person_outline,
+                    color: isD17Card ? Colors.green : Colors.amber,
+                    size: 20,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green.withOpacity(0.3) : Colors.white12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF1A1A1A),
+                ),
+                style: const TextStyle(color: Colors.white ),
+                textCapitalization: TextCapitalization.characters,
+                validator: (v) => v?.isEmpty ?? true ? 'Requis' : null,
+              ),
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Date d\'expiration',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _expiryController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: 'MM/AA',
+                            hintStyle: const TextStyle(color: Colors.white30),
+                            prefixIcon: Icon(
+                              Icons.calendar_today_outlined,
+                              color: isD17Card ? Colors.green : Colors.amber,
+                              size: 18,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: isD17Card ? Colors.green.withOpacity(0.3) : Colors.white12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+                            ),
+                            filled: true,
+                            fillColor: const Color(0xFF1A1A1A),
+                          ),
+                          style: const TextStyle(color: Colors.white),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(4),
+                            _CardExpiryInputFormatter(),
+                          ],
+                          validator: _validateExpiryDate,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('CVV',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _cvvController,
+                          obscureText: true,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: '123',
+                            hintStyle: const TextStyle(color: Colors.white30),
+                            prefixIcon: Icon(
+                              Icons.lock_outline,
+                              color: isD17Card ? Colors.green : Colors.amber,
+                              size: 18,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: isD17Card ? Colors.green.withOpacity(0.3) : Colors.white12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 2),
+                            ),
+                            filled: true,
+                            fillColor: const Color(0xFF1A1A1A),
+                          ),
+                          style: const TextStyle(color: Colors.white),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(3)
+                          ],
+                          validator: (v) => v?.length != 3 ? 'CVV invalide' : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+
+              // Bouton de paiement
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton(
+                  onPressed: _isProcessing ? null : _processPayment,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isD17Card ? Colors.green : Colors.amber,
+                    foregroundColor: Colors.black,
+                    elevation: 4,
+                    shadowColor: (isD17Card ? Colors.green : Colors.amber).withOpacity(0.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    _isProcessing
+                        ? 'Traitement en cours...'
+                        : isD17Card 
+                          ? '💰 Payer avec D17'
+                          : '💰 Payer ${widget.totalAmount.toStringAsFixed(2)} DT',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Bouton Annuler
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton(
+                  onPressed: _isProcessing ? null : () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: isD17Card ? Colors.green : Colors.amber, width: 1.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Annuler',
+                    style: TextStyle(
+                      color: isD17Card ? Colors.green : Colors.amber,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Message de sécurité
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.lock_outline,
+                      color: isD17Card ? Colors.green : Colors.amber,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Paiement sécurisé SSL 256 bits',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -691,16 +814,18 @@ Future<int> _createOrder() async {
 class _CardNumberInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    final newText = newValue.text;
-    if (newText.isEmpty) return newValue;
+    final text = newValue.text.replaceAll(' ', '');
+    if (text.isEmpty) return newValue;
+    
     final buffer = StringBuffer();
-    for (int i = 0; i < newText.length; i++) {
-      buffer.write(newText[i]);
-      if ((i + 1) % 4 == 0 && i != newText.length - 1) buffer.write(' ');
+    for (int i = 0; i < text.length; i++) {
+      if (i > 0 && i % 4 == 0) buffer.write(' ');
+      buffer.write(text[i]);
     }
+    
     return TextEditingValue(
-      text: buffer.toString(), 
-      selection: TextSelection.collapsed(offset: buffer.length)
+      text: buffer.toString(),
+      selection: TextSelection.collapsed(offset: buffer.length),
     );
   }
 }
@@ -708,177 +833,109 @@ class _CardNumberInputFormatter extends TextInputFormatter {
 class _CardExpiryInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    final newText = newValue.text;
-    if (newText.isEmpty) return newValue;
+    final text = newValue.text.replaceAll('/', '');
+    if (text.isEmpty) return newValue;
+    
     final buffer = StringBuffer();
-    for (int i = 0; i < newText.length; i++) {
-      buffer.write(newText[i]);
-      if (i == 1 && newText.length > 2) buffer.write('/');
+    for (int i = 0; i < text.length; i++) {
+      if (i == 2) buffer.write('/');
+      buffer.write(text[i]);
     }
+    
     return TextEditingValue(
-      text: buffer.toString(), 
-      selection: TextSelection.collapsed(offset: buffer.length)
+      text: buffer.toString(),
+      selection: TextSelection.collapsed(offset: buffer.length),
     );
   }
 }
 
 class OrderConfirmationScreen extends StatelessWidget {
   final int orderId;
+  final bool isD17Card;
 
-  const OrderConfirmationScreen({super.key, required this.orderId});
-
-  Widget _build3DText(String text, {double fontSize = 24, Color color = Colors.white, Color shadowColor = Colors.black}) {
-    return Stack(
-      children: [
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 3
-              ..color= shadowColor,
-              shadows: [
-              BoxShadow(
-                blurRadius: 10,
-                color: shadowColor,
-                offset: const Offset(2, 2),
-              ),
-            ],
-          ),
-        ),
-        
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            color: color,
-            shadows: [
-              BoxShadow(
-                blurRadius: 20,
-                color: color,
-                offset: const Offset(0, 0),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  const OrderConfirmationScreen({
+    super.key, 
+    required this.orderId,
+    this.isD17Card = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.green,
-        title: const Text('Confirmation'),
-      ),
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: NetworkImage(
-                  'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80',
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isD17Card) ...[
+                Container(
+                  padding: const EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.green.withOpacity(0.2),
+                  ),
+                  child: Image.network(
+                    'https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Logo-poste-tunisienne.jpg/800px-Logo-poste-tunisienne.jpg',
+                    height: 60,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.local_post_office, color: Colors.green, size: 60),
+                  ),
                 ),
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(
-                  Colors.black,
-                  BlendMode.darken,
-                ),
-              ),
-            ),
-          ),
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black,
-                  Colors.black,
-                  Colors.black,
-                ],
-              ),
-            ),
-          ),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Container(
-                padding: const EdgeInsets.all(32),
+                const SizedBox(height: 20),
+              ],
+              Container(
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.green),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.green,
-                      blurRadius: 20,
-                      spreadRadius: 3,
-                    ),
-                  ],
+                  shape: BoxShape.circle, 
+                  color: Colors.green.withOpacity(0.2),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      color: Colors.green,
-                      size: 100,
-                    ),
-                    const SizedBox(height: 24),
-                    _build3DText(
-                      'Commande Confirmée!',
-                      fontSize: 28,
-                      color: Colors.green,
-                      shadowColor: Colors.greenAccent,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Votre commande #$orderId a été traitée avec succès.',
-                      style: const TextStyle(fontSize: 18, color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Merci pour votre achat!',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 32),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.popUntil(context, (route) => route.isFirst);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text(
-                          'Retour à l\'accueil',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ],
+                child: const Icon(Icons.check_circle, size: 80, color: Colors.green),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                '✅ Commande Confirmée!',
+                style: TextStyle(
+                  color: Colors.white, 
+                  fontSize: 24, 
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Commande #$orderId',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7), 
+                  fontSize: 18,
                 ),
               ),
-            ),
+              const SizedBox(height: 8),
+              Text(
+                isD17Card 
+                    ? 'Paiement D17 effectué avec succès'
+                    : 'Un email de confirmation vous a été envoyé',
+                style: const TextStyle(color: Colors.white38, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: () => Navigator.popUntil(context, (route) => route.isFirst),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  '🏠 Retour à l\'accueil',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
+import 'dart:ui'; // Nécessaire pour l'effet de flou (BackdropFilter)
 import '../providers/auth_provider.dart';
 import 'ChefScreen.dart';
 import 'ServeurScreen.dart';
@@ -37,56 +38,46 @@ class _LoginScreenState extends State<LoginScreen>
     super.initState();
     _initializeAnimations();
     _testServerConnection();
-    
-    // Effet de parallaxe pour le background
-    timeDilation = 1.5;
+    timeDilation = 1.2; // Légèrement ralenti pour plus d'élégance
   }
 
   @override
   void dispose() {
     _animationController.dispose();
     timeDilation = 1.0;
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
   void _initializeAnimations() {
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1200),
     );
     
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
     
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.3, 0.8, curve: Curves.elasticOut),
-      ),
+    _scaleAnimation = Tween<double>(begin: 0.9, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
     );
     
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-      ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-      ),
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
     );
     
     _animationController.forward();
   }
 
+  // --- Logique de connexion ---
+
   Future<void> _testServerConnection() async {
     try {
-      setState(() {
-        _serverError = '';
-        _isLoading = true;
+      setState(() { 
+        _serverError = ''; 
+        _isLoading = true; 
       });
       
       final connected = await context.read<AuthProvider>().testConnection();
@@ -94,79 +85,62 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() {
         _serverConnected = connected;
         _isLoading = false;
-        if (!connected) {
-          _serverError = 'Impossible de se connecter au serveur. '
-                         'Vérifiez votre connexion internet.';
-        }
+        if (!connected) _serverError = 'Liaison serveur interrompue. Vérifiez votre accès réseau.';
       });
       
-      if (connected) {
-        await _tryAutoLogin();
-      }
+      if (connected && mounted) await _tryAutoLogin();
     } catch (e) {
-      debugPrint('Connection test failed: $e');
-      setState(() {
-        _serverConnected = false;
-        _isLoading = false;
-        _serverError = 'Erreur de connexion: ${e.toString()}';
-      });
+      if (mounted) {
+        setState(() { 
+          _serverConnected = false; 
+          _isLoading = false; 
+          _serverError = 'Erreur réseau critique.'; 
+        });
+      }
     }
   }
 
   Future<void> _tryAutoLogin() async {
     try {
       await context.read<AuthProvider>().tryAutoLogin();
-      final authProvider = context.read<AuthProvider>();
-      if (authProvider.isAuth && mounted) {
-        _redirectToAppropriateScreen(authProvider);
+      if (mounted) {
+        final authProvider = context.read<AuthProvider>();
+        if (authProvider.isAuth) {
+          _redirectToAppropriateScreen(authProvider);
+        }
       }
-    } catch (e) {
-      debugPrint('Auto login failed: $e');
-    }
+    } catch (_) {}
   }
 
   void _redirectToAppropriateScreen(AuthProvider authProvider) {
     final route = authProvider.getRedirectRoute();
-    
+    Widget destination;
     switch (route) {
-      case '/chef':
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const ChefScreen())
-        );
+      case '/chef': 
+        destination = const ChefScreen(); 
         break;
-      case '/serveur':
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const ServeurScreen())
-        );
+      case '/serveur': 
+        destination = const ServeurScreen(); 
         break;
-      case '/client':
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const RestaurantScreen())
-        );
+      case '/admin': 
+        destination = const AdminScreen(); 
         break;
-      case '/admin':
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const AdminScreen())
-        );
-        break;
-      default:
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const RestaurantScreen())
-        );
+      default: 
+        destination = const RestaurantScreen();
+    }
+    
+    if (mounted) {
+      Navigator.pushReplacement(
+        context, 
+        MaterialPageRoute(builder: (_) => destination)
+      );
     }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (!_serverConnected) {
-      setState(() {
-        _serverError = 'Veuillez attendre que la connexion au serveur soit établie.';
-      });
+      setState(() => _serverError = 'Connexion serveur requise pour s\'identifier.');
       return;
     }
     
@@ -180,94 +154,67 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
       
       if (result['success'] == true) {
-        final authProvider = context.read<AuthProvider>();
-        _redirectToAppropriateScreen(authProvider);
+        _redirectToAppropriateScreen(context.read<AuthProvider>());
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Identifiants invalides'),
-            backgroundColor: Colors.red
-          )
-        );
+        _showSnackBar(result['message'] ?? 'Accès refusé', Colors.redAccent);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur de connexion: ${e.toString()}'),
-            backgroundColor: Colors.red
-          )
-        );
+        _showSnackBar('Erreur système : ${e.toString()}', Colors.redAccent);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _showSnackBar(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg), 
+        backgroundColor: color, 
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
   Future<void> _showQRScanner() async {
     final result = await QRScannerWrapper.scanQRCode(context);
-    if (result != null) {
-      // Remplir automatiquement les champs avec les données scannées
-      if (result.containsKey('email')) {
-        _emailController.text = result['email']!;
-      }
-      if (result.containsKey('password')) {
-        _passwordController.text = result['password']!;
-      }
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Identifiants importés avec succès'),
-          backgroundColor: Colors.green,
-        ),
-      );
+    if (result != null && mounted) {
+      if (result.containsKey('email')) _emailController.text = result['email']!;
+      if (result.containsKey('password')) _passwordController.text = result['password']!;
+      _showSnackBar('Profil importé avec succès', Colors.green);
     }
   }
+
+  // --- Interface Design ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0F0F0F), // Noir profond organique
       body: Stack(
         children: [
-          // Background avec effet 3D et parallaxe
           _buildParallaxBackground(),
-          
-          // Overlay sombre pour améliorer la lisibilité
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.7),
-                  Colors.black.withOpacity(0.5),
-                  Colors.black.withOpacity(0.3),
+          _buildMainOverlay(),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Column(
+                children: [
+                  const SizedBox(height: 40),
+                  _buildAnimatedLogo(),
+                  const SizedBox(height: 24),
+                  _buildAnimatedHeader(),
+                  const SizedBox(height: 40),
+                  _buildQRScanButton(),
+                  const SizedBox(height: 24),
+                  _buildLoginCard(),
+                  const SizedBox(height: 30),
                 ],
               ),
-            ),
-          ),
-          
-          // Contenu principal
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 60),
-                
-                // Header avec effet 3D
-                _buildAnimatedHeader(),
-                
-                const SizedBox(height: 40),
-
-                // Bouton de scan QR code
-                _buildQRScanButton(),
-
-                const SizedBox(height: 20),
-
-                // Carte de connexion avec effet 3D
-                _buildLoginCard(),
-              ],
             ),
           ),
         ],
@@ -279,52 +226,72 @@ class _LoginScreenState extends State<LoginScreen>
     return Container(
       decoration: const BoxDecoration(
         image: DecorationImage(
-          image: NetworkImage(
-            'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80',
-          ),
+          image: NetworkImage('https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?q=80&w=2070&auto=format&fit=crop'),
           fit: BoxFit.cover,
-          colorFilter: ColorFilter.mode(
-            Colors.black,
-            BlendMode.darken,
-          ),
         ),
       ),
     );
   }
 
-  Widget _buildAnimatedHeader() {
-    return SlideTransition(
-      position: _slideAnimation,
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: ScaleTransition(
-          scale: _scaleAnimation,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _build3DText(
-                'Content de vous',
-                fontSize: 32,
-                color: Colors.white,
-              ),
-              _build3DText(
-                'revoir',
-                fontSize: 36,
-                color: Colors.amber,
-                shadowColor: Colors.orange,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Connectez-vous à votre compte',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[300],
-                  fontWeight: FontWeight.w300,
-                ),
-              ),
-            ],
-          ),
+  Widget _buildMainOverlay() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withOpacity(0.8),
+            const Color(0xFF0F0F0F).withOpacity(0.9),
+            const Color(0xFF0F0F0F),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedLogo() {
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.amber.withOpacity(0.2), width: 1),
+          boxShadow: [
+            BoxShadow(color: Colors.amber.withOpacity(0.05), blurRadius: 30, spreadRadius: 5)
+          ],
+        ),
+        child: const Icon(Icons.restaurant_menu_rounded, color: Colors.amber, size: 45),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedHeader() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Column(
+        children: [
+          Text(
+            'AUTHENTIFICATION',
+            style: TextStyle(
+              letterSpacing: 3,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.amber.shade300,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Smart Resto Pro',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(height: 2, width: 30, color: Colors.amber),
+        ],
       ),
     );
   }
@@ -332,30 +299,20 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildQRScanButton() {
     return SlideTransition(
       position: _slideAnimation,
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: ScaleTransition(
-          scale: _scaleAnimation,
-          child: SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: ElevatedButton.icon(
-              onPressed: _showQRScanner,
-              icon: const Icon(Icons.qr_code_scanner, size: 24),
-              label: const Text(
-                'Scanner le QR Code',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue[800],
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 8,
-                shadowColor: Colors.blue.withOpacity(0.5),
-              ),
-            ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 54,
+        child: OutlinedButton.icon(
+          onPressed: _showQRScanner,
+          icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+          label: const Text(
+            'SCANNER LE BADGE QR', 
+            style: TextStyle(letterSpacing: 1.1, fontWeight: FontWeight.bold)
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(color: Colors.white.withOpacity(0.2)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
       ),
@@ -365,62 +322,33 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildLoginCard() {
     return SlideTransition(
       position: _slideAnimation,
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: ScaleTransition(
-          scale: _scaleAnimation,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.amber.withOpacity(0.3),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.amber.withOpacity(0.1),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
             child: Form(
               key: _formKey,
               child: Column(
                 children: [
-                  // Server status indicator
                   _buildServerStatus(),
-                  
-                  // Error message if any
                   if (_serverError.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     _buildErrorCard(),
                   ],
-                  
                   const SizedBox(height: 24),
-
-                  // Email field
                   _buildEmailField(),
-                  const SizedBox(height: 20),
-
-                  // Password field
+                  const SizedBox(height: 16),
                   _buildPasswordField(),
-                  const SizedBox(height: 28),
-
-                  // Login button
+                  const SizedBox(height: 32),
                   _buildLoginButton(),
-                  const SizedBox(height: 24),
-
-                  // Register section
+                  const SizedBox(height: 20),
                   _buildRegisterSection(),
                 ],
               ),
@@ -431,105 +359,35 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _build3DText(
-    String text, {
-    double fontSize = 24,
-    Color color = Colors.white,
-    Color shadowColor = Colors.black,
-  }) {
-    return Stack(
+  Widget _buildServerStatus() {
+    return Row(
       children: [
-        // Ombre portée pour effet 3D
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 3
-              ..color = shadowColor,
-            shadows: [
-              Shadow(
-                blurRadius: 10,
-                color: shadowColor.withOpacity(0.5),
-                offset: const Offset(2, 2),
-              ),
-            ],
+        Container(
+          width: 8, 
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _serverConnected ? Colors.greenAccent : Colors.orangeAccent,
+            boxShadow: [
+              BoxShadow(
+                color: (_serverConnected ? Colors.greenAccent : Colors.orangeAccent).withOpacity(0.4),
+                blurRadius: 6, 
+                spreadRadius: 2
+              )
+            ]
           ),
         ),
-        // Texte principal
+        const SizedBox(width: 10),
         Text(
-          text,
+          _serverConnected ? 'SYSTÈME OPÉRATIONNEL' : 'RECHERCHE DU SERVEUR...',
           style: TextStyle(
-            fontSize: fontSize,
+            color: Colors.white.withOpacity(0.6),
+            fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: color,
-            shadows: [
-              Shadow(
-                blurRadius: 20,
-                color: color.withOpacity(0.3),
-                offset: const Offset(0, 0),
-              ),
-            ],
+            letterSpacing: 0.5,
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildServerStatus() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: _serverConnected 
-          ? Colors.green.withOpacity(0.2) 
-          : Colors.orange.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _serverConnected 
-            ? Colors.green.withOpacity(0.5) 
-            : Colors.orange.withOpacity(0.5),
-        ),
-      ),
-      child: Row(
-        children: [
-          _isLoading
-            ? SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(
-                    _serverConnected ? Colors.green : Colors.orange,
-                  ),
-                ),
-              )
-            : Icon(
-                _serverConnected ? Icons.check_circle : Icons.warning,
-                color: _serverConnected ? Colors.green : Colors.orange,
-                size: 20,
-              ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              _serverConnected 
-                ? 'Connecté au serveur' 
-                : 'Connexion en cours...',
-              style: TextStyle(
-                color: _serverConnected ? Colors.green : Colors.orange,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          if (!_serverConnected)
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.amber, size: 20),
-              onPressed: _testServerConnection,
-              tooltip: 'Réessayer la connexion',
-            ),
-        ],
-      ),
     );
   }
 
@@ -537,21 +395,13 @@ class _LoginScreenState extends State<LoginScreen>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.2),
+        color: Colors.redAccent.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.withOpacity(0.5)),
+        border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
       ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, color: Colors.red[300], size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              _serverError,
-              style: TextStyle(color: Colors.red[300], fontSize: 14),
-            ),
-          ),
-        ],
+      child: Text(
+        _serverError, 
+        style: const TextStyle(color: Colors.redAccent, fontSize: 12)
       ),
     );
   }
@@ -559,29 +409,15 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildEmailField() {
     return TextFormField(
       controller: _emailController,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: 'Email',
-        labelStyle: TextStyle(color: Colors.grey[400]),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.5)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.3)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.amber),
-        ),
-        filled: true,
-        fillColor: Colors.black.withOpacity(0.4),
-        prefixIcon: const Icon(Icons.email, color: Colors.amber),
-      ),
+      style: const TextStyle(color: Colors.white, fontSize: 15),
+      decoration: _inputDecoration('Email Professionnel', Icons.person_outline),
       validator: (value) {
-        if (value == null || value.isEmpty) return 'Email requis';
-        if (!value.contains('@')) return 'Email invalide';
+        if (value == null || value.isEmpty) {
+          return 'Email requis';
+        }
+        if (!value.contains('@')) {
+          return 'Email invalide';
+        }
         return null;
       },
     );
@@ -591,105 +427,116 @@ class _LoginScreenState extends State<LoginScreen>
     return TextFormField(
       controller: _passwordController,
       obscureText: _obscurePassword,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: 'Mot de passe',
-        labelStyle: TextStyle(color: Colors.grey[400]),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.5)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.3)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.amber),
-        ),
-        filled: true,
-        fillColor: Colors.black.withOpacity(0.4),
-        prefixIcon: const Icon(Icons.lock, color: Colors.amber),
+      style: const TextStyle(color: Colors.white, fontSize: 15),
+      decoration: _inputDecoration('Mot de passe', Icons.lock_outline).copyWith(
         suffixIcon: IconButton(
           icon: Icon(
-            _obscurePassword ? Icons.visibility : Icons.visibility_off,
-            color: Colors.amber,
+            _obscurePassword ? Icons.visibility_off : Icons.visibility, 
+            color: Colors.amber.withOpacity(0.7), 
+            size: 20
           ),
-          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+          onPressed: () {
+            if (mounted) {
+              setState(() => _obscurePassword = !_obscurePassword);
+            }
+          },
         ),
       ),
-      validator: (value) => 
-          (value == null || value.isEmpty) ? 'Mot de passe requis' : null,
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Mot de passe requis';
+        }
+        if (value.length < 6) {
+          return 'Minimum 6 caractères';
+        }
+        return null;
+      },
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14),
+      prefixIcon: Icon(icon, color: Colors.amber.withOpacity(0.8), size: 20),
+      filled: true,
+      fillColor: Colors.black.withOpacity(0.2),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14), 
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.08))
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14), 
+        borderSide: const BorderSide(color: Colors.amber, width: 1)
+      ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 18),
     );
   }
 
   Widget _buildLoginButton() {
-    return SizedBox(
+    return Container(
       width: double.infinity,
       height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          if (_serverConnected) 
+            BoxShadow(
+              color: Colors.amber.withOpacity(0.25), 
+              blurRadius: 20, 
+              offset: const Offset(0, 4)
+            )
+        ],
+      ),
       child: ElevatedButton(
-        onPressed: (_serverConnected && !_isLoading) ? _submit : null,
+        onPressed: (_serverConnected && !_isLoading && mounted) ? _submit : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: _serverConnected ? Colors.amber : Colors.grey,
+          backgroundColor: Colors.amber,
           foregroundColor: Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 8,
-          shadowColor: Colors.amber.withOpacity(0.5),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
         ),
         child: _isLoading
             ? const SizedBox(
-                width: 20,
-                height: 20,
+                width: 24, 
+                height: 24, 
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Colors.black),
-                ),
+                  strokeWidth: 2.5, 
+                  color: Colors.black
+                )
               )
-            : Text(_serverConnected ? 'Se connecter' : 'Serveur indisponible'),
+            : const Text(
+                'SE CONNECTER', 
+                style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.1)
+              ),
       ),
     );
   }
 
   Widget _buildRegisterSection() {
-    return Column(
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Divider(color: Colors.grey),
-        const SizedBox(height: 16),
         Text(
-          'Nouveau ici ?',
-          style: TextStyle(
-            color: Colors.grey[400],
-            fontSize: 14,
-          ),
+          'Nouveau membre ?', 
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: _serverConnected ? () => Navigator.push(
-              context, 
-              MaterialPageRoute(builder: (_) => const RegisterScreen())
-            ) : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.amber,
-              side: BorderSide(
-                color: _serverConnected ? Colors.amber : Colors.grey,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              textStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
+        TextButton(
+          onPressed: () {
+            if (mounted) {
+              Navigator.push(
+                context, 
+                MaterialPageRoute(builder: (_) => const RegisterScreen())
+              );
+            }
+          },
+          child: const Text(
+            'Créer un compte', 
+            style: TextStyle(
+              color: Colors.amber, 
+              fontWeight: FontWeight.bold, 
+              fontSize: 13
             ),
-            child: const Text('Créer un compte'),
           ),
         ),
       ],

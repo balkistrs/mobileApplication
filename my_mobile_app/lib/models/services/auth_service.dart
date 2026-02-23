@@ -3,7 +3,7 @@
   import '../user.dart';
 
   class AuthService {
-    static const String baseUrl = 'https://1cc7227c8427.ngrok-free.app/api';
+    static const String baseUrl = 'https://13a4-2c0f-f698-c140-2d52-c49a-dac6-216d-2512.ngrok-free.app/api';
 
     Future<Map<String, dynamic>> login(String email, String password) async {
       final res = await http.post(

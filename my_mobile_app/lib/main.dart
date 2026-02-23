@@ -9,8 +9,8 @@ import 'screens/login_screen.dart';
 import 'screens/restaurant_screen.dart';
 import 'screens/payment.dart';
 
-
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
+import 'dart:ui'; // Nécessaire pour l'effet de flou (BackdropFilter)
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -16,19 +17,20 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _serverConnected = false;
+  String _serverError = '';
   String _selectedRole = 'ROLE_CLIENT';
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<Offset> _slideAnimation;
-  String _serverError = '';
 
-  // Liste des rôles disponibles avec les types demandés
+  // Liste des rôles disponibles
   final List<Map<String, dynamic>> _roles = [
     {
       'value': 'ROLE_CLIENT',
@@ -48,311 +50,411 @@ class _RegisterScreenState extends State<RegisterScreen>
       'description': 'Personnel de service en salle',
       'icon': Icons.local_cafe,
     },
-    {
-      'value': 'ROLE_ADMIN',
-      'label': 'Administrateur',
-      'description': 'Gestionnaire complet du système',
-      'icon': Icons.admin_panel_settings,
-    },
+
   ];
 
   @override
   void initState() {
     super.initState();
+    _initializeAnimations();
     _testServerConnection();
-    
-    // Configuration des animations
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
-      ),
-    );
-    
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.3, 0.8, curve: Curves.elasticOut),
-      ),
-    );
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-      ),
-    );
-    
-    _animationController.forward();
-    timeDilation = 1.5;
+    timeDilation = 1.2; // Légèrement ralenti pour plus d'élégance
   }
 
   @override
   void dispose() {
     _animationController.dispose();
     timeDilation = 1.0;
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
+  void _initializeAnimations() {
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+    );
+    
+    _scaleAnimation = Tween<double>(begin: 0.9, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
+    );
+    
+    _animationController.forward();
+  }
+
+  // --- Logique d'inscription ---
+
   Future<void> _testServerConnection() async {
-    setState(() {
-      _serverError = '';
-      _isLoading = true;
+    setState(() { 
+      _serverError = ''; 
+      _isLoading = true; 
     });
     
     try {
       final connected = await context.read<AuthProvider>().testConnection();
-      setState(() => _serverConnected = connected);
       
-      if (!connected && mounted) {
-        setState(() {
-          _serverError = 'Impossible de se connecter au serveur. Vérifiez votre connexion Internet.';
-        });
-      }
+      setState(() {
+        _serverConnected = connected;
+        _isLoading = false;
+        if (!connected) _serverError = 'Liaison serveur interrompue. Vérifiez votre accès réseau.';
+      });
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _serverError = 'Erreur de connexion: ${e.toString()}';
-          _serverConnected = false;
+        setState(() { 
+          _serverConnected = false; 
+          _isLoading = false; 
+          _serverError = 'Erreur réseau critique.'; 
         });
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (!_serverConnected) {
-      setState(() {
-        _serverError = 'Veuillez attendre que la connexion au serveur soit établie.';
-      });
+      setState(() => _serverError = 'Connexion serveur requise pour s\'inscrire.');
       return;
     }
     
     setState(() => _isLoading = true);
     try {
-      debugPrint('🔄 Attempting registration...');
-      debugPrint('Email: ${_emailController.text.trim()}');
-      debugPrint('Role: $_selectedRole');
-      
       final result = await context.read<AuthProvider>().register(
         _emailController.text.trim(), 
-        _passwordController.text, 
+        _passwordController.text,
         _selectedRole
       );
       
-      if (result['success'] == true && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Compte créé avec succès'), 
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          )
-        );
+      if (!mounted) return;
+      
+      if (result['success'] == true) {
+        _showSnackBar('Compte créé avec succès', Colors.green);
         Navigator.pop(context);
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Inscription échouée'), 
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          )
-        );
+      } else {
+        _showSnackBar(result['message'] ?? 'Inscription échouée', Colors.redAccent);
       }
     } catch (e) {
-      debugPrint('❌ Registration error: $e');
       if (mounted) {
-        String errorMessage = 'Erreur lors de l\'inscription';
-        
-        if (e.toString().contains('Failed to fetch') || 
-            e.toString().contains('ClientException')) {
-          errorMessage = 'Impossible de se connecter au serveur. Vérifiez votre connexion Internet et réessayez.';
-          setState(() {
-            _serverConnected = false;
-          });
-        } else if (e.toString().contains('Timeout')) {
-          errorMessage = 'Le serveur met trop de temps à répondre. Veuillez réessayer.';
-        } else if (e.toString().contains('SocketException')) {
-          errorMessage = 'Problème de connexion réseau. Vérifiez votre connexion Internet.';
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage), 
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          )
-        );
+        _showSnackBar('Erreur système : ${e.toString()}', Colors.redAccent);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Widget _build3DText(String text, {double fontSize = 24, Color color = Colors.white, Color shadowColor = Colors.black}) {
-    return Stack(
-      children: [
-        // Ombre portée pour effet 3D
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 3
-              ..color = shadowColor,
-            shadows: [
-              Shadow(
-                blurRadius: 10,
-                color: shadowColor.withOpacity(0.5),
-                offset: const Offset(2, 2),
+  void _showSnackBar(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg), 
+        backgroundColor: color, 
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  // --- Interface Design (identique à LoginScreen) ---
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F0F0F), // Noir profond organique
+      body: Stack(
+        children: [
+          _buildParallaxBackground(),
+          _buildMainOverlay(),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Column(
+                children: [
+                  const SizedBox(height: 40),
+                  _buildAnimatedLogo(),
+                  const SizedBox(height: 24),
+                  _buildAnimatedHeader(),
+                  const SizedBox(height: 40),
+                  _buildRegisterCard(),
+                  const SizedBox(height: 30),
+                ],
               ),
-            ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParallaxBackground() {
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: NetworkImage('https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=2070&auto=format&fit=crop'),
+          fit: BoxFit.cover,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainOverlay() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withOpacity(0.8),
+            const Color(0xFF0F0F0F).withOpacity(0.9),
+            const Color(0xFF0F0F0F),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedLogo() {
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.amber.withOpacity(0.2), width: 1),
+          boxShadow: [
+            BoxShadow(color: Colors.amber.withOpacity(0.05), blurRadius: 30, spreadRadius: 5)
+          ],
+        ),
+        child: const Icon(Icons.person_add_alt_1_rounded, color: Colors.amber, size: 45),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedHeader() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Column(
+        children: [
+          Text(
+            'INSCRIPTION',
+            style: TextStyle(
+              letterSpacing: 3,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.amber.shade300,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Smart Resto Pro',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(height: 2, width: 30, color: Colors.amber),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRegisterCard() {
+    return SlideTransition(
+      position: _slideAnimation,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  _buildServerStatus(),
+                  if (_serverError.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildErrorCard(),
+                  ],
+                  const SizedBox(height: 24),
+                  _buildEmailField(),
+                  const SizedBox(height: 16),
+                  _buildPasswordField(),
+                  const SizedBox(height: 16),
+                  _buildConfirmPasswordField(),
+                  const SizedBox(height: 20),
+                  _buildRoleSelector(),
+                  const SizedBox(height: 32),
+                  _buildRegisterButton(),
+                  const SizedBox(height: 20),
+                  _buildLoginSection(),
+                ],
+              ),
+            ),
           ),
         ),
-        // Texte principal
+      ),
+    );
+  }
+
+  Widget _buildServerStatus() {
+    return Row(
+      children: [
+        Container(
+          width: 8, 
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _serverConnected ? Colors.greenAccent : Colors.orangeAccent,
+            boxShadow: [
+              BoxShadow(
+                color: (_serverConnected ? Colors.greenAccent : Colors.orangeAccent).withOpacity(0.4),
+                blurRadius: 6, 
+                spreadRadius: 2
+              )
+            ]
+          ),
+        ),
+        const SizedBox(width: 10),
         Text(
-          text,
+          _serverConnected ? 'SYSTÈME OPÉRATIONNEL' : 'RECHERCHE DU SERVEUR...',
           style: TextStyle(
-            fontSize: fontSize,
+            color: Colors.white.withOpacity(0.6),
+            fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: color,
-            shadows: [
-              Shadow(
-                blurRadius: 20,
-                color: color.withOpacity(0.3),
-                offset: const Offset(0, 0),
-              ),
-            ],
+            letterSpacing: 0.5,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildServerStatus() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: _serverConnected 
-          ? Colors.green.withOpacity(0.2) 
-          : Colors.orange.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _serverConnected 
-            ? Colors.green.withOpacity(0.5) 
-            : Colors.orange.withOpacity(0.5),
-        ),
-      ),
-      child: Row(
-        children: [
-          _isLoading
-            ? SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(
-                    _serverConnected ? Colors.green : Colors.orange,
-                  ),
-                ),
-              )
-            : Icon(
-                _serverConnected ? Icons.check_circle : Icons.warning,
-                color: _serverConnected ? Colors.green : Colors.orange,
-                size: 20,
-              ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              _serverConnected 
-                ? 'Connecté au serveur' 
-                : 'Connexion en cours...',
-              style: TextStyle(
-                color: _serverConnected ? Colors.green : Colors.orange,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          if (!_serverConnected)
-            IconButton(
-              icon: Icon(Icons.refresh, color: Colors.amber, size: 20),
-              onPressed: _testServerConnection,
-              tooltip: 'Réessayer la connexion',
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildErrorCard() {
-    if (_serverError.isEmpty) return const SizedBox.shrink();
-    
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.2),
+        color: Colors.redAccent.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.withOpacity(0.5)),
+        border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
       ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, color: Colors.red[300], size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              _serverError,
-              style: TextStyle(color: Colors.red[300], fontSize: 14),
-            ),
-          ),
-        ],
+      child: Text(
+        _serverError, 
+        style: const TextStyle(color: Colors.redAccent, fontSize: 12)
       ),
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    bool obscureText = false,
-    Widget? suffixIcon,
-    required String? Function(String?) validator,
-  }) {
+  Widget _buildEmailField() {
     return TextFormField(
-      controller: controller,
-      obscureText: obscureText,
-      validator: validator,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: Colors.grey[400]),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.5)),
+      controller: _emailController,
+      style: const TextStyle(color: Colors.white, fontSize: 15),
+      decoration: _inputDecoration('Email Professionnel', Icons.email_outlined),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Email requis';
+        }
+        if (!value.contains('@') || !value.contains('.')) {
+          return 'Email invalide';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildPasswordField() {
+    return TextFormField(
+      controller: _passwordController,
+      obscureText: _obscurePassword,
+      style: const TextStyle(color: Colors.white, fontSize: 15),
+      decoration: _inputDecoration('Mot de passe', Icons.lock_outline).copyWith(
+        suffixIcon: IconButton(
+          icon: Icon(
+            _obscurePassword ? Icons.visibility_off : Icons.visibility, 
+            color: Colors.amber.withOpacity(0.7), 
+            size: 20
+          ),
+          onPressed: () {
+            if (mounted) {
+              setState(() => _obscurePassword = !_obscurePassword);
+            }
+          },
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.amber.withOpacity(0.3)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.amber),
-        ),
-        filled: true,
-        fillColor: Colors.black.withOpacity(0.4),
-        prefixIcon: Icon(icon, color: Colors.amber),
-        suffixIcon: suffixIcon,
       ),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Mot de passe requis';
+        }
+        if (value.length < 6) {
+          return 'Minimum 6 caractères';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildConfirmPasswordField() {
+    return TextFormField(
+      controller: _confirmPasswordController,
+      obscureText: _obscureConfirmPassword,
+      style: const TextStyle(color: Colors.white, fontSize: 15),
+      decoration: _inputDecoration('Confirmer mot de passe', Icons.lock_outline).copyWith(
+        suffixIcon: IconButton(
+          icon: Icon(
+            _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility, 
+            color: Colors.amber.withOpacity(0.7), 
+            size: 20
+          ),
+          onPressed: () {
+            if (mounted) {
+              setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
+            }
+          },
+        ),
+      ),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Confirmation requise';
+        }
+        if (value != _passwordController.text) {
+          return 'Les mots de passe ne correspondent pas';
+        }
+        return null;
+      },
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14),
+      prefixIcon: Icon(icon, color: Colors.amber.withOpacity(0.8), size: 20),
+      filled: true,
+      fillColor: Colors.black.withOpacity(0.2),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14), 
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.08))
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14), 
+        borderSide: const BorderSide(color: Colors.amber, width: 1)
+      ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 18),
     );
   }
 
@@ -361,19 +463,20 @@ class _RegisterScreenState extends State<RegisterScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Type de compte',
+          'TYPE DE COMPTE',
           style: TextStyle(
-            color: Colors.grey[400],
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+            color: Colors.white.withOpacity(0.3),
+            fontSize: 10,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.4),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.amber.withOpacity(0.3)),
+            color: Colors.black.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
           ),
           child: Column(
             children: _roles.map((role) {
@@ -385,23 +488,18 @@ class _RegisterScreenState extends State<RegisterScreen>
                   });
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: isSelected 
-                      ? Colors.amber.withOpacity(0.2) 
+                      ? Colors.amber.withOpacity(0.1) 
                       : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected 
-                        ? Colors.amber.withOpacity(0.5) 
-                        : Colors.transparent,
-                    ),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     children: [
                       Icon(
                         role['icon'],
-                        color: isSelected ? Colors.amber : Colors.grey[400],
+                        color: isSelected ? Colors.amber : Colors.white.withOpacity(0.5),
                         size: 20,
                       ),
                       const SizedBox(width: 12),
@@ -413,17 +511,16 @@ class _RegisterScreenState extends State<RegisterScreen>
                               role['label'],
                               style: TextStyle(
                                 color: isSelected ? Colors.amber : Colors.white,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                fontSize: 14,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 2),
                             Text(
                               role['description'],
                               style: TextStyle(
-                                color: isSelected 
-                                  ? Colors.amber.withOpacity(0.8) 
-                                  : Colors.grey[400],
-                                fontSize: 12,
+                                color: Colors.white.withOpacity(0.4),
+                                fontSize: 11,
                               ),
                             ),
                           ],
@@ -433,7 +530,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                         Icon(
                           Icons.check_circle,
                           color: Colors.amber,
-                          size: 20,
+                          size: 18,
                         ),
                     ],
                   ),
@@ -446,280 +543,70 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.amber,
-        title: const Text('Inscription'),
-      ),
-      body: Stack(
-        children: [
-          // Background avec effet 3D
-          Container(
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: const NetworkImage(
-                  'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80',
-                ),
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(
-                  Colors.black.withOpacity(0.8),
-                  BlendMode.darken,
-                ),
-              ),
-            ),
-          ),
-          
-          // Overlay de dégradé
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.8),
-                  Colors.black.withOpacity(0.6),
-                  Colors.black.withOpacity(0.4),
-                ],
-              ),
-            ),
-          ),
-          
-          // Contenu principal
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 40),
-                
-                // Header avec effet 3D
-                SlideTransition(
-                  position: _slideAnimation,
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _build3DText(
-                            'Créez votre',
-                            fontSize: 32,
-                            color: Colors.white,
-                          ),
-                          _build3DText(
-                            'compte',
-                            fontSize: 36,
-                            color: Colors.amber,
-                            shadowColor: Colors.orange,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Rejoignez notre communauté',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[300],
-                              fontWeight: FontWeight.w300,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(height: 40),
-
-                // Carte d'inscription avec effet 3D
-                SlideTransition(
-                  position: _slideAnimation,
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.amber.withOpacity(0.3),
-                            width: 1,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.amber.withOpacity(0.1),
-                              blurRadius: 20,
-                              spreadRadius: 2,
-                              offset: const Offset(0, 4),
-                            ),
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 10,
-                              spreadRadius: 1,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Form(
-                          key: _formKey,
-                          child: Column(
-                            children: [
-                              // Server status indicator
-                              _buildServerStatus(),
-                              
-                              // Error message
-                              if (_serverError.isNotEmpty) ...[
-                                const SizedBox(height: 16),
-                                _buildErrorCard(),
-                              ],
-                              
-                              const SizedBox(height: 24),
-
-                              // Email field
-                              _buildTextField(
-                                controller: _emailController,
-                                label: 'Email',
-                                icon: Icons.email,
-                                validator: (v) {
-                                  if (v == null || v.isEmpty) return 'Email requis';
-                                  if (!v.contains('@')) return 'Email invalide';
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 20),
-
-                              // Password field
-                              _buildTextField(
-                                controller: _passwordController,
-                                label: 'Mot de passe',
-                                icon: Icons.lock,
-                                obscureText: _obscurePassword,
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                                    color: Colors.amber,
-                                  ),
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                                ),
-                                validator: (v) => (v == null || v.length < 6) ? 'Au moins 6 caractères' : null,
-                              ),
-                              const SizedBox(height: 20),
-
-                              // Confirm password field
-                              _buildTextField(
-                                controller: _confirmPasswordController,
-                                label: 'Confirmer mot de passe',
-                                icon: Icons.lock_outline,
-                                obscureText: _obscureConfirmPassword,
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
-                                    color: Colors.amber,
-                                  ),
-                                  onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
-                                ),
-                                validator: (v) => v != _passwordController.text ? 'Les mots de passe ne correspondent pas' : null,
-                              ),
-                              const SizedBox(height: 20),
-
-                              // Role selector
-                              _buildRoleSelector(),
-                              const SizedBox(height: 28),
-
-                              // Register button
-                              SizedBox(
-                                width: double.infinity,
-                                height: 56,
-                                child: ElevatedButton(
-                                  onPressed: (_serverConnected && !_isLoading) ? _submit : null,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _serverConnected ? Colors.amber : Colors.grey,
-                                    foregroundColor: Colors.black,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    elevation: 8,
-                                    shadowColor: Colors.amber.withOpacity(0.5),
-                                    textStyle: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation(Colors.black),
-                                          ),
-                                        )
-                                      : Text(_serverConnected ? 'Créer le compte' : 'Serveur indisponible'),
-                                ),
-                              ),
-                              
-                              if (!_serverConnected) ...[
-                                const SizedBox(height: 16),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton(
-                                    onPressed: _testServerConnection,
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.amber,
-                                      side: const BorderSide(color: Colors.amber),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    child: const Text('Réessayer la connexion'),
-                                  ),
-                                ),
-                              ],
-                              
-                              const SizedBox(height: 24),
-                              const Divider(color: Colors.grey),
-                              const SizedBox(height: 16),
-                              
-                              // Login link
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    'Déjà un compte ? ',
-                                    style: TextStyle(
-                                      color: Colors.grey[400],
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => Navigator.pop(context),
-                                    child: Text(
-                                      'Se connecter',
-                                      style: TextStyle(
-                                        color: Colors.amber,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+  Widget _buildRegisterButton() {
+    return Container(
+      width: double.infinity,
+      height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          if (_serverConnected) 
+            BoxShadow(
+              color: Colors.amber.withOpacity(0.25), 
+              blurRadius: 20, 
+              offset: const Offset(0, 4)
+            )
         ],
       ),
+      child: ElevatedButton(
+        onPressed: (_serverConnected && !_isLoading && mounted) ? _submit : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.amber,
+          foregroundColor: Colors.black,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                width: 24, 
+                height: 24, 
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5, 
+                  color: Colors.black
+                )
+              )
+            : const Text(
+                'CRÉER LE COMPTE', 
+                style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.1)
+              ),
+      ),
+    );
+  }
+
+  Widget _buildLoginSection() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'Déjà membre ?', 
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)
+        ),
+        TextButton(
+          onPressed: () {
+            if (mounted) {
+              Navigator.pop(context);
+            }
+          },
+          child: const Text(
+            'Se connecter', 
+            style: TextStyle(
+              color: Colors.amber, 
+              fontWeight: FontWeight.bold, 
+              fontSize: 13
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

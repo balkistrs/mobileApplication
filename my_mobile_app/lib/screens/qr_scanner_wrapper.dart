@@ -41,7 +41,6 @@ class WebQRScannerDialog extends StatefulWidget {
 class _WebQRScannerDialogState extends State<WebQRScannerDialog> {
   final TextEditingController _manualInputController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
-  bool _isLoading = false;
   bool _cameraActive = false;
   MobileScannerController? _cameraController;
 
@@ -73,7 +72,6 @@ class _WebQRScannerDialogState extends State<WebQRScannerDialog> {
   }
 
   Future<void> _pickImage() async {
-    setState(() => _isLoading = true);
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
       if (image != null && mounted) {
@@ -92,10 +90,6 @@ class _WebQRScannerDialogState extends State<WebQRScannerDialog> {
             backgroundColor: Colors.red,
           ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
       }
     }
   }
@@ -247,7 +241,7 @@ class MobileQRScannerScreen extends StatefulWidget {
 
 class _MobileQRScannerScreenState extends State<MobileQRScannerScreen> {
   final MobileScannerController cameraController = MobileScannerController();
-  final bool _isLoading = false;
+  bool _isLoading = false;
   bool _torchEnabled = false;
   CameraFacing _cameraFacing = CameraFacing.back;
 

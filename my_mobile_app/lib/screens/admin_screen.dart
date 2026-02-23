@@ -155,7 +155,7 @@ Future<void> _deleteUser(AppUser user) async {
         final newRole = result['role'] ?? user.roles?.first ?? 'ROLE_CLIENT';
         
         final success = await context.read<AuthProvider>().updateUser(
-          user.email, newEmail, newRole
+          user.email, newEmail, user.name ?? '', newRole
         );
         
         if (mounted) {

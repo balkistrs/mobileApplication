@@ -23,14 +23,27 @@ class Order
 {
     public const STATUS_PENDING = 'pending';
     public const STATUS_PAID = 'paid';
-    public const STATUS_CANCELLED = 'cancelled';
+    public const STATUS_PREPARING = 'preparing';
+    public const STATUS_READY = 'ready';
     public const STATUS_COMPLETED = 'completed';
+    public const STATUS_CANCELLED = 'cancelled';
 
     private static $allowedStatuses = [
         self::STATUS_PENDING,
         self::STATUS_PAID,
-        self::STATUS_CANCELLED,
-        self::STATUS_COMPLETED
+        self::STATUS_PREPARING,
+        self::STATUS_READY,
+        self::STATUS_COMPLETED,
+        self::STATUS_CANCELLED
+    ];
+
+    private static $statusTexts = [
+        self::STATUS_PENDING => 'En attente',
+        self::STATUS_PAID => 'Payée',
+        self::STATUS_PREPARING => 'En préparation',
+        self::STATUS_READY => 'Prête',
+        self::STATUS_COMPLETED => 'Terminée',
+        self::STATUS_CANCELLED => 'Annulée'
     ];
 
     #[ORM\Id]
@@ -40,9 +53,9 @@ class Order
     private ?int $id = null;
 
     #[ORM\Column(type: 'string', length: 50)]
-    #[Assert\Choice(choices: ['pending', 'paid', 'cancelled', 'completed'])]
+    #[Assert\Choice(choices: ['pending', 'paid', 'preparing', 'ready', 'completed', 'cancelled'])]
     #[Groups(['order:read', 'order:write'])]
-    private string $status = 'pending';
+    private string $status = self::STATUS_PENDING;
 
     #[ORM\Column(type: 'decimal', precision: 10, scale: 2)]
     #[Assert\NotBlank]
@@ -93,6 +106,11 @@ class Order
         }
         $this->status = $status;
         return $this;
+    }
+
+    public function getStatusText(): string
+    {
+        return self::$statusTexts[$this->status] ?? $this->status;
     }
 
     public function getTotal(): float
@@ -210,5 +228,23 @@ class Order
         $this->setInvoice($invoice);
 
         return $invoice;
+    }
+
+    public function canBeModified(): bool
+    {
+        return in_array($this->status, [
+            self::STATUS_PENDING,
+            self::STATUS_PAID
+        ]);
+    }
+
+    public static function getAllowedStatuses(): array
+    {
+        return self::$allowedStatuses;
+    }
+
+    public static function getStatusTexts(): array
+    {
+        return self::$statusTexts;
     }
 }

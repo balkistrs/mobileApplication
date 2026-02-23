@@ -20,7 +20,7 @@ class AuthProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get selectedRole => _selectedRole;
 
-  static const String baseUrl = 'https://1cc7227c8427.ngrok-free.app/api';
+  static const String baseUrl = 'https://13a4-2c0f-f698-c140-2d52-c49a-dac6-216d-2512.ngrok-free.app/api';
 
   // Helper function
   int min(int a, int b) => a < b ? a : b;
@@ -158,32 +158,43 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       _isLoading = false;
       notifyListeners();
       
-      if (response.statusCode == 201) {
-        final responseBody = json.decode(response.body);
-        
-        _token = responseBody['token'];
-        _user = AppUser.fromJson(responseBody['user'] ?? {});
-        
+      // Accept both 200 and 201 as success for registration
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final decoded = json.decode(response.body);
+        debugPrint('📩 Decoded register body: $decoded');
+
+        final responseData = decoded['data'] ?? {};
+        _token = responseData['token'];
+        _user = AppUser.fromJson(responseData['user'] ?? {});
+
+        if (_token == null || _token!.isEmpty) {
+          debugPrint('❌ Register: token missing in response');
+          return {'success': false, 'message': 'Le serveur n\'a pas renvoyé de token'};
+        }
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', _token!);
         await prefs.setString('user', json.encode(_user!.toJson()));
-        
+
+        debugPrint('✅ Registration successful, token saved');
+
         notifyListeners();
         return {
-          'success': true, 
+          'success': true,
           'message': 'Inscription réussie',
           'redirectRoute': getRedirectRoute()
         };
       } else {
         final responseBody = json.decode(response.body);
         String errorMessage = 'Erreur d\'inscription (${response.statusCode})';
-        
-        if (responseBody['message'] != null) {
+
+        if (responseBody is Map && responseBody['message'] != null) {
           errorMessage = responseBody['message'];
-        } else if (responseBody['error'] != null) {
+        } else if (responseBody is Map && responseBody['error'] != null) {
           errorMessage = responseBody['error'];
         }
-        
+
+        debugPrint('❌ Register failed: $errorMessage');
         return {'success': false, 'message': errorMessage};
       }
     } catch (e) {
@@ -316,9 +327,18 @@ Future<Map<String, dynamic>> login(String email, String password) async {
     ];
   }
 
-  Future<bool> updateUser(String email, String newEmail, String role) async {
+  Future<bool> updateUser(String email, String newEmail, String newName, String? role) async {
     try {
       final encodedEmail = Uri.encodeComponent(email);
+      // Build request body; include role only when provided and caller is admin
+      final body = {
+        'email': newEmail,
+        'name': newName,
+      };
+      if (role != null && role.isNotEmpty && hasRole('ROLE_ADMIN')) {
+        body['role'] = role;
+      }
+
       final response = await http.put(
         Uri.parse('$baseUrl/users/$encodedEmail'),
         headers: {
@@ -326,14 +346,33 @@ Future<Map<String, dynamic>> login(String email, String password) async {
           'Authorization': 'Bearer $_token',
           'ngrok-skip-browser-warning': 'true',
         },
-        body: json.encode({
-          'email': newEmail,
-          'role': role
-        }),
+        body: json.encode(body),
       ).timeout(const Duration(seconds: 10));
 
       debugPrint('📩 Update user response: ${response.statusCode} ${response.body}');
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        // Update local user copy if server returned updated data
+        try {
+          final data = json.decode(response.body);
+          final updatedUser = AppUser.fromJson(data['data']?['user'] ?? {});
+          if (updatedUser.id > 0) {
+            _user = updatedUser;
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('user', json.encode(_user!.toJson()));
+            notifyListeners();
+          } else {
+            // fallback: update fields locally
+            if (_user != null) {
+              _user = AppUser(id: _user!.id, email: newEmail, name: newName, roles: _user!.roles);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('user', json.encode(_user!.toJson()));
+              notifyListeners();
+            }
+          }
+        } catch (_) {}
+        return true;
+      }
+      return false;
     } catch (e) {
       debugPrint('Update user error: $e');
       return false;
@@ -686,6 +725,60 @@ Future<List<dynamic>> getNotifications() async {
     return [];
   }
 }
+
+  /// Submit a vote (rating) for the restaurant
+  Future<bool> submitVote(int stars) async {
+    try {
+      if (_token == null) {
+        debugPrint('❌ No token available for vote submission');
+        return false;
+      }
+
+      debugPrint('⭐ Submitting vote with $stars stars');
+      
+      final response = await http.put(
+        Uri.parse('$baseUrl/users/${_user?.email}/vote'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({'vote': stars.toString()}),
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📩 Vote response status: ${response.statusCode}');
+      debugPrint('📩 Vote response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        
+        // Update local user with the new vote
+        if (_user != null) {
+          _user = AppUser(
+            id: _user!.id,
+            email: _user!.email,
+            name: _user!.name,
+            roles: _user!.roles,
+            vote: stars.toString(),
+          );
+          notifyListeners();
+          
+          // Persist to SharedPreferences
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_vote', stars.toString());
+        }
+        
+        debugPrint('✅ Vote submitted successfully: $stars stars');
+        return true;
+      } else {
+        debugPrint('❌ Vote submission failed with status: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Vote submission error: $e');
+      return false;
+    }
+  }
+
   bool get isAdmin => hasRole('ROLE_ADMIN');
   bool get isChef => hasRole('ROLE_CHEF');
   bool get isServeur => hasRole('ROLE_SERVEUR');

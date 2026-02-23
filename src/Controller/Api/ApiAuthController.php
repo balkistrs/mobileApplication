@@ -72,6 +72,9 @@ class ApiAuthController extends AbstractController
             $user->setEmail($email);
             $user->setPassword($passwordHasher->hashPassword($user, $password));
             $user->setRoles([$role]);
+            // Set a default name from email if not provided
+            $name = $data['name'] ?? explode('@', $email)[0];
+            $user->setName($name);
 
             $this->em->persist($user);
             $this->em->flush();
@@ -338,7 +341,9 @@ public function test(Request $request): JsonResponse
                 return $this->jsonError('Non authentifié', 401);
             }
 
-            if (!in_array('ROLE_ADMIN', $currentUser->getRoles())) {
+            // Allow admins to edit any user, or allow a user to edit their own profile
+            $isAdmin = in_array('ROLE_ADMIN', $currentUser->getRoles());
+            if (!$isAdmin && $currentUser->getUserIdentifier() !== $email) {
                 return $this->jsonError('Accès non autorisé', 403);
             }
 
@@ -371,6 +376,11 @@ public function test(Request $request): JsonResponse
                 $user->setRoles([$data['role']]);
             }
 
+            if (isset($data['name'])) {
+                $newName = trim($data['name']);
+                $user->setName($newName !== '' ? $newName : null);
+            }
+
             if (isset($data['password']) && !empty($data['password'])) {
                 if (strlen($data['password']) < 6) {
                     return $this->jsonError('Le mot de passe doit contenir au moins 6 caractères', 400);
@@ -385,12 +395,70 @@ public function test(Request $request): JsonResponse
                 'user' => [
                     'id' => $user->getId(),
                     'email' => $user->getEmail(),
+                    'name' => $user->getName(),
                     'roles' => $user->getRoles()
                 ]
             ]);
 
         } catch (\Exception $e) {
             error_log('Update user error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/users/{email}/vote', name: 'api_submit_vote', methods: ['PUT', 'OPTIONS'])]
+    public function submitVote(Request $request, string $email): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return $this->json([], 200, $this->getCorsHeaders());
+        }
+
+        try {
+            $currentUser = $this->getUser();
+            if (!$currentUser) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            // Allow a user to vote for their own profile
+            if ($currentUser->getUserIdentifier() !== $email) {
+                return $this->jsonError('Accès non autorisé', 403);
+            }
+
+            $user = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+            if (!$user) {
+                return $this->jsonError('Utilisateur non trouvé', 404);
+            }
+
+            $data = $this->getRequestData($request);
+
+            if (!isset($data['vote']) || empty($data['vote'])) {
+                return $this->jsonError('Le vote est requis', 400);
+            }
+
+            $vote = trim($data['vote']);
+            
+            // Validate vote is a number between 1 and 5
+            if (!is_numeric($vote) || (int)$vote < 1 || (int)$vote > 5) {
+                return $this->jsonError('Le vote doit être un nombre entre 1 et 5', 400);
+            }
+
+            // Update vote field directly
+            $user->setVote($vote);
+            $this->em->flush();
+
+            return $this->jsonSuccess([
+                'message' => 'Vote enregistré avec succès',
+                'user' => [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'name' => $user->getName(),
+                    'vote' => $vote,
+                    'roles' => $user->getRoles()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            error_log('Submit vote error: ' . $e->getMessage());
             return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
         }
     }
@@ -419,7 +487,7 @@ public function test(Request $request): JsonResponse
                             'name' => method_exists($item, 'getProduct') && $item->getProduct() ? 
                                      $item->getProduct()->getName() : 'Produit inconnu',
                             'quantity' => method_exists($item, 'getQuantity') ? $item->getQuantity() : 1,
-                            'price' => method_exists($item, 'getPrice') ? $item->getPrice() : 0
+                            'price' => method_exists($item, 'getUnitPrice') ? $item->getUnitPrice() : 0
                         ];
                     }
                 }
@@ -694,7 +762,7 @@ public function getOrderNotifications(Request $request): JsonResponse
                         $orderItems[] = [
                             'name' => method_exists($item, 'getProduct') && $item->getProduct() ? $item->getProduct()->getName() : 'Produit inconnu',
                             'quantity' => method_exists($item, 'getQuantity') ? $item->getQuantity() : 1,
-                            'price' => method_exists($item, 'getPrice') ? $item->getPrice() : 0
+                            'price' => method_exists($item, 'getUnitPrice') ? $item->getUnitPrice() : 0
                         ];
                     }
                 }
