@@ -562,7 +562,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               const SizedBox(height: 16),
 
               // Table number input
-              const Text('Numéro de table (optionnel)',
+              const Text('Numéro de table',
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextFormField(

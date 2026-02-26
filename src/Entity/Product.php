@@ -39,6 +39,26 @@ class Product
     #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
     private bool $isAvailable = true;
 
+    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
+    private ?string $category = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
+    private ?string $image = null;
+
+    #[ORM\Column(type: 'float', nullable: true)]
+    #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
+    private ?float $rating = null;
+
+    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
+    private ?string $prepTime = null;
+
+    #[ORM\Column(type: 'boolean', nullable: true)]
+    #[Groups(['product:read', 'product:write', 'order_item:read', 'order:read'])]
+    private ?bool $populaire = false;
+
     #[ORM\OneToMany(mappedBy: 'product', targetEntity: ProductComponent::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
     #[Groups(['product:read'])]
     private Collection $components;
@@ -106,6 +126,61 @@ class Product
         return $this;
     }
 
+    public function getCategory(): ?string
+    {
+        return $this->category;
+    }
+
+    public function setCategory(?string $category): self
+    {
+        $this->category = $category;
+        return $this;
+    }
+
+    public function getImage(): ?string
+    {
+        return $this->image;
+    }
+
+    public function setImage(?string $image): self
+    {
+        $this->image = $image;
+        return $this;
+    }
+
+    public function getRating(): ?float
+    {
+        return $this->rating;
+    }
+
+    public function setRating(?float $rating): self
+    {
+        $this->rating = $rating;
+        return $this;
+    }
+
+    public function getPrepTime(): ?string
+    {
+        return $this->prepTime;
+    }
+
+    public function setPrepTime(?string $prepTime): self
+    {
+        $this->prepTime = $prepTime;
+        return $this;
+    }
+
+    public function getPopulaire(): ?bool
+    {
+        return $this->populaire;
+    }
+
+    public function setPopulaire(?bool $populaire): self
+    {
+        $this->populaire = $populaire;
+        return $this;
+    }
+
     /**
      * @return Collection<int, ProductComponent>
      */
@@ -134,7 +209,6 @@ class Product
 
         return $this;
     }
-    
 
     public function getCreatedAt(): \DateTimeInterface
     {

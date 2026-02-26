@@ -1,4 +1,5 @@
 <?php
+// src/Repository/ProductRepository.php
 
 namespace App\Repository;
 
@@ -16,28 +17,59 @@ class ProductRepository extends ServiceEntityRepository
         parent::__construct($registry, Product::class);
     }
 
-    //    /**
-    //     * @return Product[] Returns an array of Product objects
-    //     */
-    //    public function findByExampleField($value): array
-    //    {
-    //        return $this->createQueryBuilder('p')
-    //            ->andWhere('p.exampleField = :val')
-    //            ->setParameter('val', $value)
-    //            ->orderBy('p.id', 'ASC')
-    //            ->setMaxResults(10)
-    //            ->getQuery()
-    //            ->getResult()
-    //        ;
-    //    }
+    /**
+     * Find products by category
+     * @return Product[]
+     */
+    public function findByCategory(string $category): array
+    {
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.category = :category')
+            ->setParameter('category', $category)
+            ->orderBy('p.name', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
 
-    //    public function findOneBySomeField($value): ?Product
-    //    {
-    //        return $this->createQueryBuilder('p')
-    //            ->andWhere('p.exampleField = :val')
-    //            ->setParameter('val', $value)
-    //            ->getQuery()
-    //            ->getOneOrNullResult()
-    //        ;
-    //    }
+    /**
+     * Find popular products
+     * @return Product[]
+     */
+    public function findPopular(): array
+    {
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.populaire = :popular')
+            ->setParameter('popular', true)
+            ->orderBy('p.rating', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Search products by name
+     * @return Product[]
+     */
+    public function searchByName(string $searchTerm): array
+    {
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.name LIKE :search')
+            ->setParameter('search', '%' . $searchTerm . '%')
+            ->orderBy('p.name', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Find available products
+     * @return Product[]
+     */
+    public function findAvailable(): array
+    {
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.isAvailable = :available')
+            ->setParameter('available', true)
+            ->orderBy('p.name', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
 }

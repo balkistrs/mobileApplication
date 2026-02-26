@@ -587,10 +587,12 @@ class OrderController extends AbstractController
         }
 
         try {
-            // Cette route devrait être réservée aux admins
+            // Autoriser les admins, chefs et serveurs
             $user = $this->getUser();
-            if (!in_array('ROLE_ADMIN', $user->getRoles())) {
+            $allowedRoles = ['ROLE_ADMIN', 'ROLE_CHEF', 'ROLE_SERVEUR'];
+            if (empty(array_intersect($user->getRoles(), $allowedRoles))) {
                 return new JsonResponse([
+                    'success' => false,
                     'error' => 'Accès non autorisé'
                 ], 403, [
                     'Access-Control-Allow-Origin' => '*',
@@ -614,7 +616,10 @@ class OrderController extends AbstractController
                 $ordersData[] = $orderData;
             }
 
-            return new JsonResponse($ordersData, 200, [
+            return new JsonResponse([
+                'success' => true,
+                'data' => $ordersData
+            ], 200, [
                 'Access-Control-Allow-Origin' => '*',
             ]);
 
@@ -628,7 +633,7 @@ class OrderController extends AbstractController
         }
     }
 
-    #[Route('/{id}/status', name: 'api_order_update_status', methods: ['PATCH', 'OPTIONS'])]
+    #[Route('/{id}/status', name: 'api_order_update_status', methods: ['PATCH','PUT', 'OPTIONS'])]
     public function updateOrderStatus(int $id, Request $request): JsonResponse
     {
         // Handle preflight OPTIONS request
@@ -653,8 +658,10 @@ class OrderController extends AbstractController
 
             // Vérifier que l'utilisateur a accès à cette commande
             $user = $this->getUser();
-            if ($order->getUser() !== $user && !in_array('ROLE_ADMIN', $user->getRoles())) {
+            $allowedRoles = ['ROLE_ADMIN', 'ROLE_CHEF', 'ROLE_SERVEUR'];
+            if ($order->getUser() !== $user && empty(array_intersect($user->getRoles(), $allowedRoles))) {
                 return new JsonResponse([
+                    'success' => false,
                     'error' => 'Accès non autorisé à cette commande'
                 ], 403, [
                     'Access-Control-Allow-Origin' => '*',
@@ -678,7 +685,7 @@ class OrderController extends AbstractController
             $this->entityManager->flush();
 
             return new JsonResponse([
-                'status' => 'success',
+                'success' => true,
                 'message' => 'Order status updated successfully',
                 'order_id' => $order->getId(),
                 'new_status' => $order->getStatus(),

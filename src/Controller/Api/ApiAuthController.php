@@ -12,9 +12,10 @@ use App\Entity\User;
 use App\Entity\Order;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
-use App\Entity\OrderItem;
-use App\Entity\Product;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
+use App\Entity\Notification;
+use App\Entity\Product;
+use App\Entity\OrderItem;
 
 class ApiAuthController extends AbstractController
 {
@@ -160,11 +161,11 @@ class ApiAuthController extends AbstractController
             $users = $this->em->getRepository(User::class)->findAll();
             $usersData = [];
 
-            foreach ($users as $user) {
+            foreach ($users as $userItem) {
                 $usersData[] = [
-                    'id' => $user->getId(),
-                    'email' => $user->getEmail(),
-                    'roles' => $user->getRoles(),
+                    'id' => $userItem->getId(),
+                    'email' => $userItem->getEmail(),
+                    'roles' => $userItem->getRoles(),
                 ];
             }
 
@@ -196,22 +197,36 @@ class ApiAuthController extends AbstractController
                 return $this->jsonError('Accès non autorisé', 403);
             }
 
-            $orders = [
-                [
-                    'id' => 1,
-                    'client' => 'client1@example.com',
-                    'items' => ['Pizza Margherita', 'Coca-Cola'],
-                    'status' => 'en attente',
-                    'createdAt' => '2023-10-15 14:30:00'
-                ],
-                [
-                    'id' => 2,
-                    'client' => 'client2@example.com',
-                    'items' => ['Pasta Carbonara', 'Eau minérale'],
-                    'status' => 'en préparation',
-                    'createdAt' => '2023-10-15 15:15:00'
-                ]
-            ];
+            // Récupérer les commandes depuis la base
+            $statusFilter = $request->query->get('status');
+
+            $repo = $this->em->getRepository(Order::class);
+
+            if ($statusFilter) {
+                $ordersEntities = $repo->findBy(['status' => $statusFilter], ['createdAt' => 'DESC']);
+            } else {
+                $ordersEntities = $repo->findBy([], ['createdAt' => 'DESC']);
+            }
+
+            $orders = [];
+            foreach ($ordersEntities as $order) {
+                $items = [];
+                foreach ($order->getOrderItems() as $item) {
+                    $product = $item->getProduct();
+                    // OrderItem does not define getName(); use the product name when available
+                    $items[] = $product ? $product->getName() : 'Article';
+                }
+
+                $orders[] = [
+                    'id' => $order->getId(),
+                    'client' => $order->getUser() ? $order->getUser()->getEmail() : null,
+                    'items' => $items,
+                    // Use the Order entity helper to translate status to human text
+                    'status' => $order->getStatusText(),
+                    'rawStatus' => $order->getStatus(),
+                    'createdAt' => $order->getCreatedAt() ? $order->getCreatedAt()->format('Y-m-d H:i:s') : null
+                ];
+            }
 
             return $this->jsonSuccess(['orders' => $orders]);
 
@@ -300,6 +315,18 @@ class ApiAuthController extends AbstractController
             $em->persist($order);
             $em->flush();
 
+            // Créer une notification pour tous les chefs
+            $chefs = $this->em->getRepository(User::class)->findByRole('ROLE_CHEF');
+            foreach ($chefs as $chef) {
+                $this->createNotification(
+                    $chef,
+                    'new_order',
+                    'Nouvelle commande',
+                    "Nouvelle commande #{$order->getId()} de {$user->getEmail()}",
+                    $order->getId()
+                );
+            }
+
             return new JsonResponse([
                 'success' => true,
                 'order_id' => $order->getId(),
@@ -314,19 +341,19 @@ class ApiAuthController extends AbstractController
         }
     }
 
-#[Route('/api/test', name: 'api_test', methods: ['GET', 'OPTIONS'])]
-public function test(Request $request): JsonResponse
-{
-    if ($request->getMethod() === 'OPTIONS') {
-        return new JsonResponse([], 200, $this->getCorsHeaders());
-    }
+    #[Route('/api/test', name: 'api_test', methods: ['GET', 'OPTIONS'])]
+    public function test(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse([], 200, $this->getCorsHeaders());
+        }
 
-    return new JsonResponse([
-        'success' => true,
-        'message' => 'API is working!',
-        'timestamp' => time()
-    ], 200, $this->getCorsHeaders());
-}
+        return new JsonResponse([
+            'success' => true,
+            'message' => 'API is working!',
+            'timestamp' => time()
+        ], 200, $this->getCorsHeaders());
+    }
 
     #[Route('/api/users/{email}', name: 'api_update_user', methods: ['PUT', 'OPTIONS'])]
     public function updateUser(Request $request, string $email, UserPasswordHasherInterface $passwordHasher): JsonResponse
@@ -463,7 +490,7 @@ public function test(Request $request): JsonResponse
         }
     }
 
-    #[Route('/api/user/ordersUser', name: 'api_user_orders', methods: ['GET', 'OPTIONS'])]
+    #[Route('/api/user/orders', name: 'api_user_orders', methods: ['GET', 'OPTIONS'])]
     public function getUserOrders(Request $request): JsonResponse
     {
         if ($request->getMethod() === 'OPTIONS') {
@@ -549,68 +576,114 @@ public function test(Request $request): JsonResponse
         }
     }
 
-    #[Route('/api/orders/{id}/status', name: 'api_update_order_status', methods: ['PUT', 'OPTIONS'])]
-    public function updateOrderStatus(Request $request, int $id): JsonResponse
-    {
-        if ($request->getMethod() === 'OPTIONS') {
-            return $this->json([], 200, $this->getCorsHeaders());
-        }
-
-        try {
-            $user = $this->getUser();
-            if (!$user) {
-                return $this->jsonError('Non authentifié', 401);
-            }
-
-            $userRoles = $user->getRoles();
-            $allowedRoles = ['ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
-            
-            if (empty(array_intersect($userRoles, $allowedRoles))) {
-                return $this->jsonError('Accès non autorisé', 403);
-            }
-
-            $data = $this->getRequestData($request);
-            $status = $data['status'] ?? null;
-
-            if (!$status) {
-                return $this->jsonError('Statut requis', 400);
-            }
-
-            $allowedStatuses = ['pending', 'paid', 'cancelled', 'completed'];
-            
-            if (!in_array($status, $allowedStatuses)) {
-                return $this->jsonError('Statut invalide. Valeurs autorisées: ' . implode(', ', $allowedStatuses), 400);
-            }
-
-            $order = $this->em->getRepository(Order::class)->find($id);
-            
-            if (!$order) {
-                return $this->jsonError('Commande non trouvée', 404);
-            }
-            
-            $order->setStatus($status);
-            $order->setUpdatedAt(new \DateTime());
-            
-            $this->em->flush();
-
-            return $this->jsonSuccess([
-                'message' => 'Statut de la commande mis à jour',
-                'order_id' => $id,
-                'status' => $status,
-                'translated_status' => $this->translateStatus($status)
-            ]);
-
-        } catch (\Exception $e) {
-            error_log('Update order status error: ' . $e->getMessage());
-            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
-        }
+   #[Route('/api/orders/{id}/status', name: 'api_update_order_status', methods: ['PUT', 'OPTIONS'])]
+   public function updateOrderStatus(Request $request, int $id): JsonResponse
+{
+    if ($request->getMethod() === 'OPTIONS') {
+        return $this->json([], 200, $this->getCorsHeaders());
     }
+
+    try {
+        $user = $this->getUser();
+        if (!$user) {
+            return $this->jsonError('Non authentifié', 401);
+        }
+
+        $userRoles = $user->getRoles();
+        $allowedRoles = ['ROLE_CHEF', 'ROLE_SERVEUR', 'ROLE_ADMIN'];
+        
+        if (empty(array_intersect($userRoles, $allowedRoles))) {
+            return $this->jsonError('Accès non autorisé', 403);
+        }
+
+        $data = $this->getRequestData($request);
+        $status = $data['status'] ?? null;
+
+        if (!$status) {
+            return $this->jsonError('Statut requis', 400);
+        }
+
+        $allowedStatuses = ['pending', 'paid', 'preparing', 'ready', 'delivered', 'cancelled', 'completed'];
+        
+        if (!in_array($status, $allowedStatuses)) {
+            return $this->jsonError('Statut invalide. Valeurs autorisées: ' . implode(', ', $allowedStatuses), 400);
+        }
+
+        $order = $this->em->getRepository(Order::class)->find($id);
+        
+        if (!$order) {
+            return $this->jsonError('Commande non trouvée', 404);
+        }
+        
+        $order->setStatus($status);
+        $order->setUpdatedAt(new \DateTime());
+        
+        $this->em->flush();
+
+        // Créer une notification pour le client
+        $clientUser = $order->getUser();
+        if ($clientUser) {
+            $statusLabel = $this->translateStatus($status);
+            $this->createNotification(
+                $clientUser,
+                'order_status_changed',
+                'Changement de statut',
+                "Votre commande #{$id} est maintenant: {$statusLabel}",
+                $id
+            );
+        }
+
+        // Si le statut est "completed" (terminée), créer une notification pour le chef
+        if ($status === 'completed') {
+            $chefRole = 'ROLE_CHEF';
+            $chefs = $this->em->getRepository(User::class)->findByRole($chefRole);
+            foreach ($chefs as $chef) {
+                $this->createNotification(
+                    $chef,
+                    'order_delivered',
+                    '✅ Commande livrée',
+                    "La commande #{$id} a été livrée avec succès. Total: " . number_format($order->getTotal(), 2) . " DT",
+                    $id
+                );
+            }
+        }
+
+        // Si le statut est "ready", créer une notification pour le serveur
+        if ($status === 'ready') {
+            $serverRole = 'ROLE_SERVEUR';
+            $servers = $this->em->getRepository(User::class)->findByRole($serverRole);
+            foreach ($servers as $server) {
+                $this->createNotification(
+                    $server,
+                    'order_ready_for_delivery',
+                    '🚀 Commande prête à livrer',
+                    "La commande #{$id} est prête pour la livraison. Total: " . number_format($order->getTotal(), 2) . " DT",
+                    $id
+                );
+            }
+        }
+
+        return $this->jsonSuccess([
+            'message' => 'Statut de la commande mis à jour',
+            'order_id' => $id,
+            'status' => $status,
+            'translated_status' => $this->translateStatus($status)
+        ]);
+
+    } catch (\Exception $e) {
+        error_log('Update order status error: ' . $e->getMessage());
+        return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+    }
+}
 
     private function translateStatus(string $status): string
     {
         $statusMap = [
             'pending' => 'en attente',
             'paid' => 'payée',
+            'preparing' => 'en préparation',
+            'ready' => 'prête',
+            'delivered' => 'livrée',
             'cancelled' => 'annulée',
             'completed' => 'terminée'
         ];
@@ -676,62 +749,69 @@ public function test(Request $request): JsonResponse
         }
     }
 
-#[Route('/api/orders/notifications', name: 'api_order_notifications', methods: ['GET', 'OPTIONS'])]
-public function getOrderNotifications(Request $request): JsonResponse
-{
-    if ($request->getMethod() === 'OPTIONS') {
-        return new JsonResponse([], 200, $this->getCorsHeaders());
-    }
+    #[Route('/api/order-notifications', name: 'api_order_notifications', methods: ['GET', 'OPTIONS'])]
+    public function getOrderNotifications(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse([], 200, $this->getCorsHeaders());
+        }
 
-    try {
-        $user = $this->getUser();
-        if (!$user) {
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return new JsonResponse([
+                    'success' => false,
+                    'error' => 'Non authentifié'
+                ], 401, $this->getCorsHeaders());
+            }
+
+            // Récupérer les commandes prêtes à être livrées
+            $orderRepository = $this->em->getRepository(Order::class);
+            
+            // Récupérer les commandes avec statut "prête" ou "ready" ou "completed" pour le serveur
+            $readyOrders = $orderRepository->createQueryBuilder('o')
+                ->where('o.status = :status1')
+                ->setParameter('status1', 'ready')
+                ->orWhere('o.status = :status2')
+                ->setParameter('status2', 'prête')
+                ->orWhere('o.status = :status3')
+                ->setParameter('status3', 'completed')
+                ->getQuery()
+                ->getResult();
+
+            $notifications = [];
+            foreach ($readyOrders as $order) {
+                $updatedAt = $order->getUpdatedAt() 
+                    ? $order->getUpdatedAt()->format('Y-m-d H:i:s') 
+                    : 'Date inconnue';
+                
+                $message = ($order->getStatus() === 'completed') 
+                    ? 'Commande #' . $order->getId() . ' a été livrée avec succès'
+                    : 'Commande #' . $order->getId() . ' est prête à être livrée';
+                    
+                $notifications[] = [
+                    'id' => $order->getId(),
+                    'message' => $message,
+                    'order_id' => $order->getId(),
+                    'created_at' => $updatedAt,
+                    'read' => false
+                ];
+            }
+
+            return new JsonResponse([
+                'success' => true,
+                'notifications' => $notifications
+            ], 200, $this->getCorsHeaders());
+
+        } catch (\Exception $e) {
+            error_log('Get notifications error: ' . $e->getMessage());
             return new JsonResponse([
                 'success' => false,
-                'error' => 'Non authentifié'
-            ], 401, $this->getCorsHeaders());
+                'error' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500, $this->getCorsHeaders());
         }
-
-        // Récupérer les commandes prêtes à être livrées
-        $orderRepository = $this->em->getRepository(Order::class);
-        
-        // Récupérer les commandes avec statut "prête" ou "ready"
-        $readyOrders = $orderRepository->createQueryBuilder('o')
-            ->where('o.status = :status1')
-            ->setParameter('status1', 'ready')
-            ->orWhere('o.status = :status2')
-            ->setParameter('status2', 'prête')
-            ->getQuery()
-            ->getResult();
-
-        $notifications = [];
-        foreach ($readyOrders as $order) {
-            $updatedAt = $order->getUpdatedAt() 
-                ? $order->getUpdatedAt()->format('Y-m-d H:i:s') 
-                : 'Date inconnue';
-                
-            $notifications[] = [
-                'id' => $order->getId(),
-                'message' => 'Commande #' . $order->getId() . ' est prête à être livrée',
-                'order_id' => $order->getId(),
-                'created_at' => $updatedAt,
-                'read' => false
-            ];
-        }
-
-        return new JsonResponse([
-            'success' => true,
-            'notifications' => $notifications
-        ], 200, $this->getCorsHeaders());
-
-    } catch (\Exception $e) {
-        error_log('Get notifications error: ' . $e->getMessage());
-        return new JsonResponse([
-            'success' => false,
-            'error' => 'Erreur serveur: ' . $e->getMessage()
-        ], 500, $this->getCorsHeaders());
     }
-}
+
     #[Route('/api/real-orders', name: 'api_real_orders', methods: ['GET', 'OPTIONS'])]
     public function getRealOrders(Request $request): JsonResponse
     {
@@ -786,6 +866,179 @@ public function getOrderNotifications(Request $request): JsonResponse
         }
     }
 
+  #[Route('/api/products-list', name: 'api_get_products', methods: ['GET', 'OPTIONS'])]
+public function getProducts(Request $request): JsonResponse
+{
+    if ($request->getMethod() === 'OPTIONS') {
+        return new JsonResponse([], 200, array_merge($this->getCorsHeaders(), [
+            'Content-Type' => 'application/json'
+        ]));
+    }
+
+    try {
+        $productRepository = $this->em->getRepository(Product::class);
+        $products = $productRepository->findAll();
+
+        $productsData = [];
+        foreach ($products as $product) {
+            // Ensure all fields are properly cast to avoid type issues
+            $productsData[] = [
+                'id' => (int)$product->getId(),
+                'name' => (string)$product->getName(),
+                'price' => (float)$product->getPrice(),
+                'category' => $product->getCategory() ?? 'Autre',
+                'image' => $product->getImage() ?? 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500',
+                'rating' => (float)($product->getRating() ?? 4.0),
+                'prepTime' => $product->getPrepTime() ?? '15-20 min',
+                'isPopular' => (bool)($product->getPopulaire() ?? false),
+            ];
+        }
+
+        return new JsonResponse([
+            'success' => true,
+            'data' => $productsData
+        ], 200, array_merge($this->getCorsHeaders(), [
+            'Content-Type' => 'application/json'
+        ]));
+    } catch (\Exception $e) {
+        error_log('Get products error: ' . $e->getMessage());
+        return new JsonResponse([
+            'success' => false,
+            'error' => 'Erreur serveur: ' . $e->getMessage()
+        ], 500, $this->getCorsHeaders());
+    }
+}
+
+#[Route('/api/notifications', name: 'api_get_notifications', methods: ['GET'])]
+    public function getNotifications(Request $request): JsonResponse
+    {
+        try {
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $notificationRepo = $this->em->getRepository(Notification::class);
+            
+            // Récupérer uniquement les notifications de l'utilisateur connecté
+            $notifications = $notificationRepo->findBy(
+                ['user' => $user], 
+                ['createdAt' => 'DESC'], 
+                100
+            );
+
+            $data = [];
+            foreach ($notifications as $notif) {
+                $data[] = [
+                    'id' => $notif->getId(),
+                    'type' => $notif->getType(),
+                    'title' => $notif->getTitle(),
+                    'message' => $notif->getMessage(),
+                    'orderId' => $notif->getOrderId(),
+                    'isRead' => $notif->isRead(),
+                    'createdAt' => $notif->getCreatedAt()->format('Y-m-d H:i:s'),
+                ];
+            }
+
+            return $this->jsonSuccess($data);
+        } catch (\Exception $e) {
+            error_log('Get notifications error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/notifications/{id}', name: 'api_delete_notification', methods: ['DELETE'])]
+    public function deleteNotification(int $id, Request $request): JsonResponse
+    {
+        try {
+            /** @var \App\Entity\User $user */
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $notificationRepo = $this->em->getRepository(Notification::class);
+            /** @var \App\Entity\Notification|null $notification */
+            $notification = $notificationRepo->find($id);
+
+            if (!$notification) {
+                return $this->jsonError('Notification non trouvée', 404);
+            }
+
+            // Vérifier que l'utilisateur a le droit de supprimer cette notification
+            /** @var \App\Entity\User $notificationUser */
+            $notificationUser = $notification->getUser();
+            if ($notificationUser && $notificationUser->getId() !== $user->getId()) {
+                return $this->jsonError('Accès refusé', 403);
+            }
+
+            $this->em->remove($notification);
+            $this->em->flush();
+
+            return $this->jsonSuccess(['message' => 'Notification supprimée']);
+        } catch (\Exception $e) {
+            error_log('Delete notification error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    #[Route('/api/notifications/{id}/read', name: 'api_mark_notification_read', methods: ['PUT'])]
+    public function markNotificationAsRead(int $id, Request $request): JsonResponse
+    {
+        try {
+            /** @var \App\Entity\User $user */
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->jsonError('Non authentifié', 401);
+            }
+
+            $notificationRepo = $this->em->getRepository(Notification::class);
+            /** @var \App\Entity\Notification|null $notification */
+            $notification = $notificationRepo->find($id);
+
+            if (!$notification) {
+                return $this->jsonError('Notification non trouvée', 404);
+            }
+
+            // Vérifier que l'utilisateur a le droit de modifier cette notification
+            /** @var \App\Entity\User $notificationUser */
+            $notificationUser = $notification->getUser();
+            if ($notificationUser && $notificationUser->getId() !== $user->getId()) {
+                return $this->jsonError('Accès refusé', 403);
+            }
+
+            $notification->setIsRead(true);
+            $this->em->flush();
+
+            return $this->jsonSuccess(['message' => 'Notification marquée comme lue']);
+        } catch (\Exception $e) {
+            error_log('Mark notification read error: ' . $e->getMessage());
+            return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+        }
+    }
+
+    // Service helper to create notifications
+    public function createNotification(User $user, string $type, string $title, string $message, ?int $orderId = null): void
+    {
+        try {
+            $notification = new Notification();
+            $notification->setUser($user);
+            $notification->setType($type);
+            $notification->setTitle($title);
+            $notification->setMessage($message);
+            if ($orderId) {
+                $notification->setOrderId($orderId);
+            }
+            $notification->setIsRead(false);
+            // createdAt is already set in the constructor
+
+            $this->em->persist($notification);
+            $this->em->flush();
+        } catch (\Exception $e) {
+            error_log('Create notification error: ' . $e->getMessage());
+        }
+    }
+
     // ===== HELPER METHODS =====
 
     private function getRequestData(Request $request): array
@@ -797,16 +1050,16 @@ public function getOrderNotifications(Request $request): JsonResponse
         return $request->request->all();
     }
 
-   private function getCorsHeaders(): array
-{
-    return [
-        'Access-Control-Allow-Origin' => '*',
-        'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers' => 'Content-Type, Authorization, Accept, X-Requested-With, ngrok-skip-browser-warning',
-        'Access-Control-Allow-Credentials' => 'true',
-        'Access-Control-Max-Age' => '3600',
-    ];
-}
+    private function getCorsHeaders(): array
+    {
+        return [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization, Accept, X-Requested-With, ngrok-skip-browser-warning',
+            'Access-Control-Allow-Credentials' => 'true',
+            'Access-Control-Max-Age' => '3600',
+        ];
+    }
 
     private function jsonSuccess($data, int $status = 200): JsonResponse
     {

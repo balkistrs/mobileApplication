@@ -23,7 +23,7 @@ security:
 
         # Public API routes (login/register/test route)
         login:
-            pattern: ^/api/(login|register|test)$
+            pattern: ^/api/(login|register|test|products-list)$
             stateless: true
             security: false
 
@@ -34,8 +34,9 @@ security:
             jwt: ~
 
     access_control:
-        - { path: ^/api/(login|register|test)$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/(login|register|test|v1/products)$, roles: PUBLIC_ACCESS }
         - { path: ^/api/orders/notifications, roles: ROLE_CHEF }
+        - { path: ^/api/notifications, roles: IS_AUTHENTICATED_FULLY }
 
         - { path: ^/api/admin, roles: ROLE_ADMIN }
         - { path: ^/api/orders, roles: [ROLE_CHEF, ROLE_CLIENT, ROLE_SERVEUR, ROLE_ADMIN] }

@@ -11,7 +11,8 @@ use Symfony\Component\Serializer\Annotation\Groups;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: OrderRepository::class)]
-#[ORM\Table(name: '`order`', indexes: [
+// Use a non-reserved table name to avoid SQL quoting issues
+#[ORM\Table(name: 'orders', indexes: [
     new ORM\Index(name: 'idx_order_status', columns: ['status']),
     new ORM\Index(name: 'idx_order_created', columns: ['created_at'])
 ])]

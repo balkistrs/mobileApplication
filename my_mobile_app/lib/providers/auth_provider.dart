@@ -6,14 +6,13 @@ import '../models/user.dart';
 
 class AuthProvider with ChangeNotifier {
   AppUser? _user;
-    int? _userId; // Ajoutez cette propriété
+  int? _userId;
 
   String? _token;
   bool _isLoading = false;
   String? _selectedRole;
-    // Getter pour l'ID utilisateur
+  
   int? get userId => _userId;
-
   AppUser? get user => _user;
   String? get token => _token;
   bool get isAuth => _token != null;
@@ -51,86 +50,86 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-Future<Map<String, dynamic>> login(String email, String password) async {
-  _isLoading = true;
-  notifyListeners();
+  Future<Map<String, dynamic>> login(String email, String password) async {
+    _isLoading = true;
+    notifyListeners();
 
-  try {
-    debugPrint('🔐 Attempting login for: $email');
-    
-    final response = await http.post(
-      Uri.parse('$baseUrl/login'),
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
-      },
-      body: json.encode({'email': email, 'password': password}),
-    ).timeout(const Duration(seconds: 90));
-
-    debugPrint('📩 Login response status: ${response.statusCode}');
-    debugPrint('📩 Login response body: ${response.body}');
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
+    try {
+      debugPrint('🔐 Attempting login for: $email');
       
-      final responseData = data['data'];
-      _token = responseData['token'];
-      
-      if (_token == null) {
-        debugPrint('❌ CRITICAL: Token is null in login response!');
-        debugPrint('❌ Full response data: $data');
-        throw Exception('Server did not return a token');
+      final response = await http.post(
+        Uri.parse('$baseUrl/login'),
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({'email': email, 'password': password}),
+      ).timeout(const Duration(seconds: 90));
+
+      debugPrint('📩 Login response status: ${response.statusCode}');
+      debugPrint('📩 Login response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        final responseData = data['data'];
+        _token = responseData['token'];
+        
+        if (_token == null) {
+          debugPrint('❌ CRITICAL: Token is null in login response!');
+          debugPrint('❌ Full response data: $data');
+          throw Exception('Server did not return a token');
+        }
+        
+        if (_token!.isEmpty) {
+          debugPrint('❌ CRITICAL: Token is empty in login response!');
+          throw Exception('Server returned an empty token');
+        }
+        
+        debugPrint('✅ Token received successfully');
+        debugPrint('✅ Token preview: ${_token!.substring(0, min(50, _token!.length))}...');
+        debugPrint('✅ Token length: ${_token!.length}');
+        
+        _user = AppUser.fromJson(responseData['user'] ?? {});
+        _userId = _user?.id;
+        
+        debugPrint('✅ Login response user data: ${responseData['user']}');
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', _token!);
+        await prefs.setString('user', json.encode(_user!.toJson()));
+        await prefs.setInt('userId', _userId!);
+        
+        debugPrint('✅ Token and user ID saved to shared preferences');
+        
+        _isLoading = false;
+        notifyListeners();
+        
+        return {
+          'success': true,
+          'message': 'Connexion réussie',
+          'redirectRoute': getRedirectRoute()
+        };
+      } else {
+        debugPrint('❌ Login failed: ${response.statusCode} ${response.body}');
+        _isLoading = false;
+        notifyListeners();
+        return {
+          'success': false,
+          'message': 'Échec de la connexion: ${response.statusCode}'
+        };
       }
-      
-      if (_token!.isEmpty) {
-        debugPrint('❌ CRITICAL: Token is empty in login response!');
-        throw Exception('Server returned an empty token');
-      }
-      
-      debugPrint('✅ Token received successfully');
-      debugPrint('✅ Token preview: ${_token!.substring(0, min(50, _token!.length))}...');
-      debugPrint('✅ Token length: ${_token!.length}');
-      
-      _user = AppUser.fromJson(responseData['user'] ?? {});
-      _userId = _user?.id; // Stocker l'ID utilisateur
-      
-      debugPrint('✅ Login response user data: ${responseData['user']}');
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', _token!);
-      await prefs.setString('user', json.encode(_user!.toJson()));
-      await prefs.setInt('userId', _userId!); // Stocker l'ID utilisateur
-      
-      debugPrint('✅ Token and user ID saved to shared preferences');
-      
-      _isLoading = false;
-      notifyListeners();
-      
-      return {
-        'success': true,
-        'message': 'Connexion réussie',
-        'redirectRoute': getRedirectRoute()
-      };
-    } else {
-      debugPrint('❌ Login failed: ${response.statusCode} ${response.body}');
+    } catch (e) {
+      debugPrint('❌ Login error: $e');
+      debugPrint('❌ Error type: ${e.runtimeType}');
       _isLoading = false;
       notifyListeners();
       return {
         'success': false,
-        'message': 'Échec de la connexion: ${response.statusCode}'
+        'message': 'Erreur de connexion: $e'
       };
     }
-  } catch (e) {
-    debugPrint('❌ Login error: $e');
-    debugPrint('❌ Error type: ${e.runtimeType}');
-    _isLoading = false;
-    notifyListeners();
-    return {
-      'success': false,
-      'message': 'Erreur de connexion: $e'
-    };
   }
-}
 
   Future<Map<String, dynamic>> register(String email, String password, String role) async {
     _isLoading = true;
@@ -158,7 +157,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       _isLoading = false;
       notifyListeners();
       
-      // Accept both 200 and 201 as success for registration
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = json.decode(response.body);
         debugPrint('📩 Decoded register body: $decoded');
@@ -249,56 +247,62 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       throw Exception('Failed to load users: $e');
     }
   }
+Future<List<Map<String, dynamic>>> getOrders() async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/real-orders'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_token',
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+    ).timeout(const Duration(seconds: 10));
 
-  Future<List<Map<String, dynamic>>> getOrders() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/real-orders'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_token',
-          'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-        },
-      ).timeout(const Duration(seconds: 10));
+    debugPrint('📩 Orders response status: ${response.statusCode}');
+    debugPrint('📩 Orders response body: ${response.body}');
 
-      debugPrint('📩 Real orders response status: ${response.statusCode}');
-      debugPrint('📩 Real orders response body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        
-        if (data is Map && data.containsKey('success') && data['success'] == true) {
-          final responseData = data['data'] ?? {};
-          final List<dynamic> ordersData = responseData['orders'] ?? [];
-          
-          final List<Map<String, dynamic>> orders = [];
-          
-          for (var order in ordersData) {
-            if (order is Map<String, dynamic>) {
-              orders.add(order);
-            }
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      
+      // Adapter selon le format de votre réponse
+      List<dynamic> ordersData = [];
+      
+      if (data is Map) {
+        if (data.containsKey('success') && data['success'] == true) {
+          if (data.containsKey('data') && data['data'] is Map) {
+            ordersData = data['data']['orders'] ?? [];
+          } else if (data.containsKey('orders')) {
+            ordersData = data['orders'];
           }
-          
-          debugPrint('✅ Successfully loaded ${orders.length} real orders');
-          return orders;
-        } else {
-          debugPrint('❌ Unexpected response format: $data');
-          return [];
+        } else if (data.containsKey('orders')) {
+          ordersData = data['orders'];
         }
-      } else {
-        // Fallback vers l'ancien endpoint si le nouveau n'existe pas encore
-        debugPrint('❌ Real orders endpoint not available, falling back to mock data');
-        return await _getMockOrders();
+      } else if (data is List) {
+        ordersData = data;
       }
-    } catch (e) {
-      debugPrint('❌ Get real orders error: $e');
-      return await _getMockOrders();
+      
+      // Convertir en List<Map<String, dynamic>>
+      final List<Map<String, dynamic>> orders = [];
+      for (var order in ordersData) {
+        if (order is Map<String, dynamic>) {
+          orders.add(order);
+        }
+      }
+      
+      debugPrint('✅ Successfully loaded ${orders.length} orders');
+      return orders;
+    } else {
+      debugPrint('❌ Failed to load orders: ${response.statusCode}');
+      return [];
     }
+  } catch (e) {
+    debugPrint('Get orders error: $e');
+    return [];
   }
+}
 
   Future<List<Map<String, dynamic>>> _getMockOrders() async {
-    // Données de simulation plus réalistes
     return [
       {
         'id': 1,
@@ -327,10 +331,233 @@ Future<Map<String, dynamic>> login(String email, String password) async {
     ];
   }
 
+  Future<List<Map<String, dynamic>>> getProducts() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/products-list'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📩 Products response status: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        List<dynamic> productsData = [];
+        
+        if (data is Map && data.containsKey('success') && data['success'] == true) {
+          final responseData = data['data'] ?? {};
+          if (responseData is List) {
+            productsData = responseData;
+          } else if (responseData is Map && responseData.containsKey('products')) {
+            productsData = responseData['products'] ?? [];
+          } else if (responseData is Map) {
+            productsData = responseData.values.toList();
+          }
+        } else if (data is List) {
+          productsData = data;
+        }
+        
+        final List<Map<String, dynamic>> products = [];
+        
+        for (var product in productsData) {
+          if (product is Map<String, dynamic>) {
+            products.add({
+              'id': product['id'].toString(),
+              'name': product['name'] ?? 'Unknown',
+              'price': (product['price'] is String) 
+                ? double.tryParse(product['price']) ?? 0.0
+                : (product['price'] ?? 0.0).toDouble(),
+              'category': product['category'] ?? 'Other',
+              'image': product['image'] ?? 'https://via.placeholder.com/200',
+              'rating': product['rating'] ?? 4.0,
+              'prepTime': product['prepTime'] ?? '15-20 min',
+              'isPopular': product['isPopular'] ?? false,
+            });
+          }
+        }
+        
+        debugPrint('✅ Successfully loaded ${products.length} products');
+        return products;
+      } else {
+        debugPrint('❌ Products endpoint error: ${response.statusCode}');
+        return [];
+      }
+    } catch (e) {
+      debugPrint('❌ Get products error: $e');
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getUserNotifications() async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/notifications'),
+      headers: {
+        'Authorization': 'Bearer $_token',
+        'ngrok-skip-browser-warning': 'true',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
+
+    debugPrint('📩 Notifications response status: ${response.statusCode}');
+    debugPrint('📩 Notifications response body: ${response.body}');
+
+    final responseBody = response.body.trim();
+    if (responseBody.startsWith('<!DOCTYPE') || 
+        responseBody.startsWith('<html') ||
+        responseBody.contains('<!DOCTYPE')) {
+      debugPrint('❌ API returned HTML instead of JSON for notifications');
+      return [];
+    }
+
+    if (response.statusCode == 200) {
+      try {
+        final data = json.decode(responseBody);
+        
+        // Gérer différents formats de réponse
+        List<dynamic> notificationsData = [];
+        
+        if (data is Map) {
+          if (data.containsKey('data') && data['data'] is List) {
+            notificationsData = data['data'];
+          } else if (data.containsKey('notifications') && data['notifications'] is List) {
+            notificationsData = data['notifications'];
+          }
+        } else if (data is List) {
+          notificationsData = data;
+        }
+        
+        final List<Map<String, dynamic>> notifications = [];
+        
+        for (var notif in notificationsData) {
+          if (notif is Map<String, dynamic>) {
+            Map<String, dynamic> processedNotif = {};
+            
+            notif.forEach((key, value) {
+              // Gestion spéciale pour le champ 'id'
+              if (key == 'id') {
+                if (value is String) {
+                  processedNotif[key] = int.tryParse(value) ?? 0;
+                } else if (value is int) {
+                  processedNotif[key] = value;
+                } else {
+                  processedNotif[key] = 0;
+                }
+              }
+              // Gestion spéciale pour le champ 'orderId'
+              else if (key == 'orderId') {
+                if (value is String) {
+                  processedNotif[key] = int.tryParse(value) ?? 0;
+                } else if (value is int) {
+                  processedNotif[key] = value;
+                } else {
+                  processedNotif[key] = 0;
+                }
+              }
+              // Gestion spéciale pour le champ 'user' (qui peut être une chaîne comme "/api/users/1")
+              else if (key == 'user') {
+                if (value is String) {
+                  // Extraire l'ID du format "/api/users/1"
+                  final parts = value.split('/');
+                  final userIdStr = parts.last;
+                  processedNotif['userId'] = int.tryParse(userIdStr) ?? 0;
+                  processedNotif[key] = value; // Garder la chaîne originale
+                } else if (value is Map) {
+                  processedNotif[key] = value;
+                } else {
+                  processedNotif[key] = value;
+                }
+              }
+              // Gestion du champ 'isRead'
+              else if (key == 'isRead') {
+                if (value is bool) {
+                  processedNotif[key] = value;
+                } else if (value is int) {
+                  processedNotif[key] = value == 1;
+                } else if (value is String) {
+                  processedNotif[key] = value.toLowerCase() == 'true';
+                } else {
+                  processedNotif[key] = false;
+                }
+              }
+              // Pour tous les autres champs
+              else {
+                processedNotif[key] = value;
+              }
+            });
+            
+            // S'assurer que les champs obligatoires existent
+            processedNotif['id'] ??= 0;
+            processedNotif['isRead'] ??= false;
+            processedNotif['title'] ??= 'Notification';
+            processedNotif['message'] ??= '';
+            processedNotif['type'] ??= 'info';
+            processedNotif['created_at'] ??= processedNotif['createdAt'] ?? DateTime.now().toIso8601String();
+            
+            notifications.add(processedNotif);
+          }
+        }
+        
+        debugPrint('✅ Successfully loaded ${notifications.length} notifications');
+        return notifications;
+      } catch (e) {
+        debugPrint('❌ JSON decode error: $e');
+        debugPrint('❌ Response body: $responseBody');
+        return [];
+      }
+    } else {
+      debugPrint('❌ Failed to load notifications: ${response.statusCode}');
+      return [];
+    }
+  } catch (e) {
+    debugPrint('Error fetching notifications: $e');
+    return [];
+  }
+}
+
+  Future<bool> deleteNotification(int notificationId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/notifications/$notificationId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('❌ Delete notification error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> markNotificationAsRead(int notificationId) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/notifications/$notificationId/read'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('❌ Mark notification read error: $e');
+      return false;
+    }
+  }
+
   Future<bool> updateUser(String email, String newEmail, String newName, String? role) async {
     try {
       final encodedEmail = Uri.encodeComponent(email);
-      // Build request body; include role only when provided and caller is admin
       final body = {
         'email': newEmail,
         'name': newName,
@@ -351,7 +578,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
 
       debugPrint('📩 Update user response: ${response.statusCode} ${response.body}');
       if (response.statusCode == 200) {
-        // Update local user copy if server returned updated data
         try {
           final data = json.decode(response.body);
           final updatedUser = AppUser.fromJson(data['data']?['user'] ?? {});
@@ -361,7 +587,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
             await prefs.setString('user', json.encode(_user!.toJson()));
             notifyListeners();
           } else {
-            // fallback: update fields locally
             if (_user != null) {
               _user = AppUser(id: _user!.id, email: newEmail, name: newName, roles: _user!.roles);
               final prefs = await SharedPreferences.getInstance();
@@ -384,7 +609,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       final encodedEmail = Uri.encodeComponent(email);
       debugPrint('🗑️ Deleting user with email: $email (encoded: $encodedEmail)');
       
-      // Use the admin endpoint instead
       final response = await http.delete(
         Uri.parse('$baseUrl/admin/users/$encodedEmail'),
         headers: {
@@ -398,13 +622,10 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       debugPrint('📩 Delete user response status: ${response.statusCode}');
       debugPrint('📩 Delete user response body: ${response.body}');
       
-      // Check if the response is successful (200 or 204)
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        // Your API returns success: true in the response
         return data['success'] == true;
       } else if (response.statusCode == 204) {
-        // Some APIs return 204 No Content on successful DELETE
         return true;
       } else if (response.statusCode == 404) {
         debugPrint('❌ User not found (404)');
@@ -417,7 +638,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       debugPrint('❌ Delete user error: $e');
       debugPrint('❌ Error type: ${e.runtimeType}');
       
-      // More detailed error handling
       if (e is http.ClientException) {
         debugPrint('❌ Network error: ${e.message}');
         debugPrint('❌ URI: ${e.uri}');
@@ -429,7 +649,6 @@ Future<Map<String, dynamic>> login(String email, String password) async {
 
   Future<bool> updateOrderStatus(String orderId, String status) async {
     try {
-      // Convertir le statut en anglais avant de l'envoyer au serveur
       final englishStatus = _convertStatusToEnglish(status);
       
       debugPrint('🔄 Updating order $orderId to status: $englishStatus (original: $status)');
@@ -487,56 +706,55 @@ Future<Map<String, dynamic>> login(String email, String password) async {
     }
   }
 
-// Méthode pour convertir les statuts du serveur (anglais) vers l'interface utilisateur (français)
-String getStatusText(String status) {
-  switch (status) {
-    case 'paid': return 'Payée';
-    case 'pending': return 'En attente';
-    case 'cancelled': return 'Annulée';
-    case 'completed': return 'Terminée';
-    case 'en attente': return 'En attente';
-    case 'payée': return 'Payée';
-    case 'annulée': return 'Annulée';
-    case 'terminée': return 'Terminée';
-    default: return status;
-  }
-}
-
-// Méthode pour convertir les statuts de l'interface utilisateur (français) vers le serveur (anglais)
-String _convertStatusToEnglish(String frenchStatus) {
-  switch (frenchStatus.toLowerCase()) {
-    case 'en attente': return 'pending';
-    case 'payée': return 'paid';
-    case 'annulée': return 'cancelled';
-    case 'terminée': return 'completed';
-    default: return frenchStatus; // Ne pas convertir si déjà en anglais
-  }
-}
-
-Future<void> tryAutoLogin() async {
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
-    final userJson = prefs.getString('user');
-    final userId = prefs.getInt('userId'); // Récupérer l'ID utilisateur
-    
-    debugPrint('🔍 Auto login check - Token: ${token != null}');
-    debugPrint('🔍 Auto login check - User: ${userJson != null}');
-    debugPrint('🔍 Auto login check - User ID: ${userId != null}');
-    
-    if (token != null && userJson != null) {
-      _token = token;
-      _user = AppUser.fromJson(json.decode(userJson));
-      _userId = userId; // Restaurer l'ID utilisateur
-      debugPrint('✅ Auto login successful');
-      notifyListeners();
-    } else {
-      debugPrint('❌ Auto login failed: Missing token or user data');
+  String getStatusText(String status) {
+    switch (status) {
+      case 'paid': return 'Payée';
+      case 'pending': return 'En attente';
+      case 'cancelled': return 'Annulée';
+      case 'completed': return 'Terminée';
+      case 'en attente': return 'En attente';
+      case 'payée': return 'Payée';
+      case 'annulée': return 'Annulée';
+      case 'terminée': return 'Terminée';
+      default: return status;
     }
-  } catch (e) {
-    debugPrint('❌ Auto login failed: $e');
   }
-}
+
+  String _convertStatusToEnglish(String frenchStatus) {
+    switch (frenchStatus.toLowerCase()) {
+      case 'en attente': return 'pending';
+      case 'payée': return 'paid';
+      case 'annulée': return 'cancelled';
+      case 'terminée': return 'completed';
+      default: return frenchStatus;
+    }
+  }
+
+  Future<void> tryAutoLogin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      final userJson = prefs.getString('user');
+      final userId = prefs.getInt('userId');
+      
+      debugPrint('🔍 Auto login check - Token: ${token != null}');
+      debugPrint('🔍 Auto login check - User: ${userJson != null}');
+      debugPrint('🔍 Auto login check - User ID: ${userId != null}');
+      
+      if (token != null && userJson != null) {
+        _token = token;
+        _user = AppUser.fromJson(json.decode(userJson));
+        _userId = userId;
+        debugPrint('✅ Auto login successful');
+        notifyListeners();
+      } else {
+        debugPrint('❌ Auto login failed: Missing token or user data');
+      }
+    } catch (e) {
+      debugPrint('❌ Auto login failed: $e');
+    }
+  }
+
   Future<void> logout() async {
     _user = null;
     _token = null;
@@ -678,55 +896,6 @@ Future<void> tryAutoLogin() async {
     return false;
   }
 
-Future<List<dynamic>> getNotifications() async {
-  try {
-    final response = await http.get(
-      Uri.parse('$baseUrl/orders/notifications'),
-      headers: {
-        'Authorization': 'Bearer $token',
-            'ngrok-skip-browser-warning': 'true',
-
-        'Content-Type': 'application/json',
-        'Accept': 'application/json', // Force l'acceptation du JSON
-
-      },
-    );
-
-
-    debugPrint('📩 Notifications response status: ${response.statusCode}');
-    debugPrint('📩 Notifications response body: ${response.body}');
-
-    // Vérifier si la réponse est du HTML au lieu du JSON
-    final responseBody = response.body.trim();
-    if (responseBody.startsWith('<!DOCTYPE') || 
-        responseBody.startsWith('<html') ||
-        responseBody.contains('<!DOCTYPE')) {
-      debugPrint('❌ API returned HTML instead of JSON for notifications');
-      return [];
-    }
-
-    if (response.statusCode == 200) {
-      try {
-        final data = json.decode(responseBody);
-        return data['notifications'] ?? [];
-      } catch (e) {
-        debugPrint('❌ JSON decode error: $e');
-        return [];
-      }
-    } else if (response.statusCode == 404) {
-      debugPrint('⚠️ Notifications endpoint not found (404)');
-      return [];
-    } else {
-      debugPrint('❌ Failed to load notifications: ${response.statusCode}');
-      return [];
-    }
-  } catch (e) {
-    debugPrint('Error fetching notifications: $e');
-    return [];
-  }
-}
-
-  /// Submit a vote (rating) for the restaurant
   Future<bool> submitVote(int stars) async {
     try {
       if (_token == null) {
@@ -751,7 +920,6 @@ Future<List<dynamic>> getNotifications() async {
 
       if (response.statusCode == 200) {
         
-        // Update local user with the new vote
         if (_user != null) {
           _user = AppUser(
             id: _user!.id,
@@ -762,7 +930,6 @@ Future<List<dynamic>> getNotifications() async {
           );
           notifyListeners();
           
-          // Persist to SharedPreferences
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('user_vote', stars.toString());
         }

@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'dart:ui'; // Nécessaire pour l'effet de flou (BackdropFilter)
 import '../providers/auth_provider.dart';
-import 'ChefScreen.dart';
-import 'ServeurScreen.dart';
+import 'chef_screen.dart';
+import 'serveur_screen.dart';
 import 'restaurant_screen.dart';
 import 'admin_screen.dart';
 import 'register_screen.dart';

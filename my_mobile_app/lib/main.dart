@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:resto_app/screens/admin_screen.dart';
-import 'package:resto_app/screens/ChefScreen.dart';
-import 'package:resto_app/screens/ServeurScreen.dart';
+import 'package:resto_app/screens/chef_screen.dart';
+import 'package:resto_app/screens/serveur_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cart_provider.dart';
 import 'screens/login_screen.dart';
