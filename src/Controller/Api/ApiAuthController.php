@@ -536,6 +536,103 @@ class ApiAuthController extends AbstractController
             return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
         }
     }
+// Dans src/Controller/Api/ApiAuthController.php, ajoutez cette méthode :
+
+#[Route('/api/auth/google', name: 'api_auth_google', methods: ['POST', 'OPTIONS'])]
+public function googleAuth(Request $request, UserPasswordHasherInterface $passwordHasher): JsonResponse
+{
+    if ($request->getMethod() === 'OPTIONS') {
+        return $this->json([], 200, $this->getCorsHeaders());
+    }
+
+    try {
+        error_log('=== GOOGLE AUTH START ===');
+        
+        $data = $this->getRequestData($request);
+        error_log('Données reçues: ' . json_encode($data));
+
+        if (!isset($data['email']) || !isset($data['google_id'])) {
+            error_log('Email ou Google ID manquant');
+            return $this->jsonError('Email et Google ID requis', 400);
+        }
+
+        $email = $data['email'];
+        $googleId = $data['google_id'];
+        $name = $data['name'] ?? explode('@', $email)[0];
+        $photoUrl = $data['photo_url'] ?? null;
+
+        error_log("Email: $email, GoogleId: $googleId, Name: $name");
+
+        // Vérifier si l'utilisateur existe déjà
+        $user = $this->em->getRepository(User::class)->findOneBy(['email' => $email]);
+        error_log('Utilisateur existant: ' . ($user ? 'Oui' : 'Non'));
+
+        if (!$user) {
+            error_log('Création nouvel utilisateur...');
+            
+            $user = new User();
+            $user->setEmail($email);
+            $user->setName($name);
+            
+            $randomPassword = bin2hex(random_bytes(8));
+            $user->setPassword($passwordHasher->hashPassword($user, $randomPassword));
+            $user->setRoles(['ROLE_CLIENT']);
+            $user->setGoogleId($googleId);
+            
+            if ($photoUrl) {
+                $user->setPhotoUrl($photoUrl);
+            }
+
+            $this->em->persist($user);
+            $this->em->flush();
+            error_log('Utilisateur créé avec ID: ' . $user->getId());
+
+            $this->createNotification(
+                $user,
+                'welcome',
+                'Bienvenue sur Smart Resto Pro',
+                'Votre compte a été créé avec succès via Google'
+            );
+        } else {
+            error_log('Mise à jour utilisateur existant...');
+            
+            if (!$user->getGoogleId()) {
+                $user->setGoogleId($googleId);
+            }
+            if ($photoUrl && !$user->getPhotoUrl()) {
+                $user->setPhotoUrl($photoUrl);
+            }
+            $this->em->flush();
+            error_log('Utilisateur mis à jour');
+        }
+
+        error_log('Génération du token JWT...');
+        $token = $this->jwtManager->create($user);
+        error_log('Token généré avec succès');
+
+        $response = [
+            'token' => $token,
+            'user' => [
+                'id' => $user->getId(),
+                'email' => $user->getEmail(),
+                'name' => $user->getName(),
+                'roles' => $user->getRoles(),
+                'google_id' => $user->getGoogleId(),
+                'photo_url' => $user->getPhotoUrl(),
+            ]
+        ];
+        
+        error_log('Réponse préparée: ' . json_encode($response));
+        error_log('=== GOOGLE AUTH END ===');
+
+        return $this->jsonSuccess($response);
+
+    } catch (\Exception $e) {
+        error_log('❌ Google auth error: ' . $e->getMessage());
+        error_log('❌ Stack trace: ' . $e->getTraceAsString());
+        return $this->jsonError('Erreur serveur: ' . $e->getMessage(), 500);
+    }
+}
 
     #[Route('/api/admin/users/{email}', name: 'api_delete_user', methods: ['DELETE', 'OPTIONS'])]
     public function deleteUser(Request $request, string $email): JsonResponse

@@ -145,12 +145,15 @@ class _RestaurantScreenState extends State<RestaurantScreen>
     });
   }
 
-  void _showNotificationsDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+// Dans _showNotificationsDialog(), remplacez la méthode par celle-ci :
+
+void _showNotificationsDialog() {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => Container(
         height: MediaQuery.of(context).size.height * 0.8,
         decoration: const BoxDecoration(
           color: Color(0xFF0A0A0A),
@@ -188,6 +191,13 @@ class _RestaurantScreenState extends State<RestaurantScreen>
                       color: Colors.white,
                     ),
                   ),
+                  const Spacer(),
+                  // Bouton pour tout effacer
+                  if (_notifications.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                      onPressed: () => _showClearAllConfirmDialog(context),
+                    ),
                 ],
               ),
             ),
@@ -217,71 +227,103 @@ class _RestaurantScreenState extends State<RestaurantScreen>
                     final title = notification['title'] ?? 'Mise à jour commande';
                     final message = notification['message'] ?? '';
                     final isRead = notification['isRead'] ?? false;
+                    final notificationId = notification['id'] ?? 0;
                     
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.03),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: isRead 
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.amber.withOpacity(0.3),
+                    return Dismissible(
+                      key: Key('notification_$notificationId'),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(20),
                         ),
+                        child: const Icon(Icons.delete, color: Colors.white, size: 30),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.shopping_bag, color: Colors.amber, size: 20),
+                      confirmDismiss: (direction) async {
+                        return await _showDeleteConfirmDialog(context);
+                      },
+                      onDismissed: (direction) {
+                        _deleteNotification(notificationId, index);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.03),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isRead 
+                                ? Colors.white.withOpacity(0.05)
+                                : Colors.amber.withOpacity(0.3),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  style: TextStyle(
-                                    fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
-                                    fontSize: 14,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  message,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.white.withOpacity(0.7),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  notification['createdAt'] ?? 'Date inconnue',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.white.withOpacity(0.3),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (!isRead)
+                        ),
+                        child: Row(
+                          children: [
                             Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.amber,
-                                shape: BoxShape.circle,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.shopping_bag, color: Colors.amber, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: TextStyle(
+                                      fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+                                      fontSize: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    message,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white.withOpacity(0.7),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    notification['createdAt'] ?? 'Date inconnue',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white.withOpacity(0.3),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                        ],
+                            if (!isRead)
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Colors.amber,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            const SizedBox(width: 8),
+                            // Bouton de suppression
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                              onPressed: () async {
+                                final confirm = await _showDeleteConfirmDialog(context);
+                                if (confirm == true) {
+                                  _deleteNotification(notificationId, index);
+                                }
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -308,9 +350,274 @@ class _RestaurantScreenState extends State<RestaurantScreen>
           ],
         ),
       ),
+    ),
+  );
+}
+
+// Remplacez la méthode _deleteNotification par celle-ci :
+
+Future<void> _deleteNotification(int notificationId, int index) async {
+  final auth = context.read<AuthProvider>();
+  
+  // Sauvegarder la notification pour restauration possible
+  final deletedNotification = _notifications[index];
+  
+  try {
+    // Afficher un indicateur de chargement
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Suppression en cours...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    
+    // Supprimer immédiatement de l'UI pour une meilleure réactivité
+    setState(() {
+      _notifications.removeAt(index);
+      _notificationCount = _notifications.length;
+    });
+    
+    debugPrint('🗑️ Tentative de suppression notification ID: $notificationId');
+    
+    final success = await auth.deleteNotification(notificationId);
+    
+    if (!success && mounted) {
+      // Si échec, restaurer la notification
+      setState(() {
+        _notifications.insert(index, deletedNotification);
+        _notificationCount = _notifications.length;
+      });
+      
+      // Proposer une solution alternative
+      _showDeleteErrorDialog(context, notificationId);
+    } else if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Notification supprimée'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'ANNULER',
+            textColor: Colors.black,
+            onPressed: () {
+              // Restaurer la notification
+              setState(() {
+                _notifications.insert(index, deletedNotification);
+                _notificationCount = _notifications.length;
+              });
+            },
+          ),
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('❌ Erreur détaillée: $e');
+    
+    if (mounted) {
+      // Restaurer la notification
+      setState(() {
+        _notifications.insert(index, deletedNotification);
+        _notificationCount = _notifications.length;
+      });
+      
+      _showDeleteErrorDialog(context, notificationId);
+    }
+  }
+}
+
+// Nouvelle méthode pour afficher les options en cas d'erreur
+void _showDeleteErrorDialog(BuildContext context, int notificationId) {
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text(
+        'Erreur de suppression',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: const Text(
+        'Impossible de supprimer la notification du serveur.\n\nQue voulez-vous faire ?',
+        style: TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Garder', style: TextStyle(color: Colors.white70)),
+        ),
+        TextButton(
+          onPressed: () {
+            Navigator.pop(ctx);
+            // Option 2: Marquer comme lue
+            _markNotificationAsRead(notificationId);
+          },
+          child: const Text('Marquer comme lue', style: TextStyle(color: Colors.amber)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(ctx);
+            // Option 3: Supprimer localement uniquement
+            setState(() {
+              _notifications.removeWhere((n) => n['id'] == notificationId);
+              _notificationCount = _notifications.length;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Notification masquée localement'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Masquer localement'),
+        ),
+      ],
+    ),
+  );
+}
+
+// Méthode pour marquer comme lue
+Future<void> _markNotificationAsRead(int notificationId) async {
+  final auth = context.read<AuthProvider>();
+  
+  try {
+    final success = await auth.markNotificationAsRead(notificationId);
+    
+    if (success && mounted) {
+      // Mettre à jour l'état local
+      setState(() {
+        final index = _notifications.indexWhere((n) => n['id'] == notificationId);
+        if (index != -1) {
+          _notifications[index]['isRead'] = true;
+        }
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notification marquée comme lue'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('Erreur marquage lecture: $e');
+  }
+}
+
+// Dialogue de confirmation pour supprimer une notification
+Future<bool?> _showDeleteConfirmDialog(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text(
+        'Supprimer la notification',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: const Text(
+        'Voulez-vous vraiment supprimer cette notification ?',
+        style: TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Annuler', style: TextStyle(color: Colors.white70)),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Supprimer'),
+        ),
+      ],
+    ),
+  );
+}
+
+// Dialogue pour tout supprimer
+void _showClearAllConfirmDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text(
+        'Tout supprimer',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: const Text(
+        'Voulez-vous vraiment supprimer toutes les notifications ?',
+        style: TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Annuler', style: TextStyle(color: Colors.white70)),
+        ),
+        ElevatedButton(
+          onPressed: () async {
+            Navigator.pop(ctx);
+            await _deleteAllNotifications();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Tout supprimer'),
+        ),
+      ],
+    ),
+  );
+}
+
+// Méthode pour tout supprimer
+Future<void> _deleteAllNotifications() async {
+  final auth = context.read<AuthProvider>();
+  int successCount = 0;
+  int failCount = 0;
+  
+  for (var i = _notifications.length - 1; i >= 0; i--) {
+    final notification = _notifications[i];
+    final notificationId = notification['id'] ?? 0;
+    
+    if (notificationId > 0) {
+      final success = await auth.deleteNotification(notificationId);
+      if (success) {
+        successCount++;
+        setState(() {
+          _notifications.removeAt(i);
+        });
+      } else {
+        failCount++;
+      }
+    }
+  }
+  
+  setState(() {
+    _notificationCount = _notifications.length;
+  });
+  
+  if (mounted) {
+    String message = '$successCount notification(s) supprimée(s)';
+    if (failCount > 0) {
+      message += ', $failCount échouée(s)';
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: failCount == 0 ? Colors.green : Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
-
+}
   Future<void> _maybeStartPolling() async {
     final auth = context.read<AuthProvider>();
     // Initialize local notifications

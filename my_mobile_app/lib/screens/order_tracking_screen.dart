@@ -45,6 +45,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
     }).toList();
   }
 
+  int min(int a, int b) => a < b ? a : b;
+
   Future<void> _loadUserOrders() async {
     if (!mounted) return;
     
@@ -100,12 +102,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
         
         List<dynamic> ordersList = [];
         
-        // Handle different response formats
         if (jsonResponse is List) {
-          // Direct list response
           ordersList = jsonResponse;
         } else if (jsonResponse is Map<String, dynamic>) {
-          // Map response with success field
           if (jsonResponse['success'] == true) {
             final data = jsonResponse['data'];
             if (data is List) {
@@ -122,12 +121,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
         
         debugPrint('📊 Total commandes reçues: ${ordersList.length}');
         
-        // Transform the data to match your UI expectations
         final List<Map<String, dynamic>> transformedOrders = [];
         
         for (var order in ordersList) {
           if (order is Map<String, dynamic>) {
-            // Handle different possible structures
             List<dynamic> items = [];
             
             if (order['orderItems'] != null && order['orderItems'] is List) {
@@ -136,11 +133,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
               items = order['items'];
             }
             
-            // Transform items to a consistent format
             final List<Map<String, dynamic>> transformedItems = [];
             for (var item in items) {
               if (item is Map<String, dynamic>) {
-                // Handle different possible item structures
                 String itemName = 'Produit';
                 double itemPrice = 0.0;
                 int itemQuantity = 1;
@@ -175,6 +170,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
               'total': (order['total'] as num?)?.toDouble() ?? 0.0,
               'createdAt': order['createdAt'] ?? order['created_at'] ?? '',
               'orderItems': transformedItems,
+              'rated': order['rated'] ?? false,
+              'userRating': order['userRating'],
             });
           }
         }
@@ -184,6 +181,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
             _orders = transformedOrders;
             _isLoading = false;
           });
+          
+          // Charger les évaluations locales
+          await _loadLocalRatings();
           
           debugPrint('✅ ${_orders.length} commandes chargées avec succès');
         }
@@ -213,7 +213,210 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
     }
   }
 
-  int min(int a, int b) => a < b ? a : b;
+  // Charger les évaluations locales
+  Future<void> _loadLocalRatings() async {
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final localRatings = await auth.getAllLocalRatings();
+      
+      setState(() {
+        for (var i = 0; i < _orders.length; i++) {
+          final order = _orders[i];
+          final rating = localRatings[order['id']];
+          if (rating != null) {
+            _orders[i]['rated'] = true;
+            _orders[i]['userRating'] = rating;
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('❌ Erreur chargement évaluations locales: $e');
+    }
+  }
+
+  // Vérifier si une commande peut être notée
+  bool _canRateOrder(Map<String, dynamic> order) {
+    return order['status'] == 'completed' && (order['rated'] != true);
+  }
+
+  // Afficher le dialogue d'évaluation
+  void _showRatingDialog(Map<String, dynamic> order) {
+    int selectedRating = 0;
+    bool isSubmitting = false;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: Row(
+            children: [
+              Icon(Icons.stars, color: Colors.amber),
+              const SizedBox(width: 8),
+              const Text(
+                'Évaluer votre commande',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withAlpha((0.1 * 255).round()),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'Commande #${order['id']}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Comment évaluez-vous votre expérience ?',
+                      style: TextStyle(color: Colors.white.withAlpha((0.7 * 255).round())),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Étoiles de notation
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return GestureDetector(
+                    onTap: isSubmitting ? null : () => setState(() => selectedRating = index + 1),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        index < selectedRating ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 40,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              if (selectedRating > 0)
+                Text(
+                  _getRatingText(selectedRating),
+                  style: TextStyle(
+                    color: Colors.amber,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                
+              if (isSubmitting)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(color: Colors.amber),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+              child: const Text('Annuler', style: TextStyle(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: (selectedRating == 0 || isSubmitting)
+                  ? null
+                  : () async {
+                      setState(() => isSubmitting = true);
+                      
+                      final auth = Provider.of<AuthProvider>(context, listen: false);
+                      final success = await auth.submitOrderRating(order['id'], selectedRating);
+                      
+                      setState(() => isSubmitting = false);
+                      
+                      if (success && mounted) {
+                        Navigator.pop(ctx);
+                        
+                        setState(() {
+                          order['rated'] = true;
+                          order['userRating'] = selectedRating;
+                        });
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                Icon(Icons.check_circle, color: Colors.black),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Merci pour votre évaluation !',
+                                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        '${_getRatingText(selectedRating)} (${selectedRating}/5)',
+                                        style: TextStyle(color: Colors.black87, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            backgroundColor: Colors.amber,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      } else if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Erreur lors de l\'envoi de l\'évaluation'),
+                            backgroundColor: Colors.red,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Envoyer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Texte descriptif pour chaque note
+  String _getRatingText(int rating) {
+    switch (rating) {
+      case 1:
+        return 'Très déçu(e)';
+      case 2:
+        return 'Pas satisfait(e)';
+      case 3:
+        return 'Correct';
+      case 4:
+        return 'Satisfait(e)';
+      case 5:
+        return 'Excellent !';
+      default:
+        return '';
+    }
+  }
 
   String _getStatusText(String status) {
     switch (status) {
@@ -279,7 +482,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => _OrderDetailsSheet(order: order),
+      builder: (ctx) => _OrderDetailsSheet(
+        order: order,
+        onRateOrder: () => _showRatingDialog(order),
+      ),
     );
   }
 
@@ -360,7 +566,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
     }
 
     final orders = _filteredOrders;
-    debugPrint('🔍 Affichage de ${orders.length} commandes');
 
     return Column(
       children: [
@@ -609,7 +814,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
                                   
                                   const SizedBox(height: 12),
                                   
-                                  // Total
+                                  // Total et évaluation
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
@@ -627,16 +832,55 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
                                         ],
                                       ),
                                       
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.withAlpha((0.1 * 255).round()),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: IconButton(
-                                          icon: const Icon(Icons.timeline, color: Colors.blue),
-                                          onPressed: () => _showTrackingDialog(order),
-                                          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                                        ),
+                                      Row(
+                                        children: [
+                                          // Bouton de suivi existant
+                                          Container(
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.withAlpha((0.1 * 255).round()),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: IconButton(
+                                              icon: const Icon(Icons.timeline, color: Colors.blue),
+                                              onPressed: () => _showTrackingDialog(order),
+                                              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                                            ),
+                                          ),
+                                          
+                                          const SizedBox(width: 8),
+                                          
+                                          // Bouton d'évaluation
+                                          if (_canRateOrder(order))
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.amber.withAlpha((0.1 * 255).round()),
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: IconButton(
+                                                icon: const Icon(Icons.star_rounded, color: Colors.amber),
+                                                onPressed: () => _showRatingDialog(order),
+                                                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                                              ),
+                                            )
+                                          else if (order['rated'] == true)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: Colors.amber.withAlpha((0.1 * 255).round()),
+                                                borderRadius: BorderRadius.circular(20),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  const Icon(Icons.star, color: Colors.amber, size: 16),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    order['userRating'] != null ? '${order['userRating']}/5' : 'Déjà noté',
+                                                    style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -758,8 +1002,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> with SingleTi
 // Order Details Bottom Sheet
 class _OrderDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> order;
+  final VoidCallback? onRateOrder;
 
-  const _OrderDetailsSheet({required this.order});
+  const _OrderDetailsSheet({
+    required this.order,
+    this.onRateOrder,
+  });
 
   String _getStatusText(String status) {
     switch (status) {
@@ -959,6 +1207,65 @@ class _OrderDetailsSheet extends StatelessWidget {
                   ],
                 ),
                 const Divider(height: 30, color: Colors.white24),
+                
+                // Afficher l'évaluation si elle existe
+                if (order['rated'] == true)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withAlpha((0.1 * 255).round()),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.star, color: Colors.amber),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Votre évaluation : ',
+                          style: TextStyle(color: Colors.white.withAlpha((0.7 * 255).round())),
+                        ),
+                        const SizedBox(width: 4),
+                        Row(
+                          children: List.generate(5, (index) {
+                            return Icon(
+                              index < (order['userRating'] ?? 0) ? Icons.star : Icons.star_border,
+                              color: Colors.amber,
+                              size: 20,
+                            );
+                          }),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (order['status'] == 'completed' && onRateOrder != null)
+                  // Bouton d'évaluation si commande terminée et non notée
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          onRateOrder?.call();
+                        },
+                        icon: const Icon(Icons.star, color: Colors.amber),
+                        label: const Text(
+                          'Évaluer cette commande',
+                          style: TextStyle(color: Colors.amber),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.amber),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                
+                // Bouton Fermer
                 SizedBox(
                   width: double.infinity,
                   height: 50,

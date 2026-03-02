@@ -119,4 +119,38 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     {
         return $this->orders;
     }
+    // Dans src/Entity/User.php, ajoutez ces propriétés :
+
+/**
+ * @ORM\Column(type="string", length=255, nullable=true)
+ */
+private ?string $googleId = null;
+
+/**
+ * @ORM\Column(type="string", length=500, nullable=true)
+ */
+private ?string $photoUrl = null;
+
+// Getters et setters
+public function getGoogleId(): ?string
+{
+    return $this->googleId;
+}
+
+public function setGoogleId(?string $googleId): self
+{
+    $this->googleId = $googleId;
+    return $this;
+}
+
+public function getPhotoUrl(): ?string
+{
+    return $this->photoUrl;
+}
+
+public function setPhotoUrl(?string $photoUrl): self
+{
+    $this->photoUrl = $photoUrl;
+    return $this;
+}
 }

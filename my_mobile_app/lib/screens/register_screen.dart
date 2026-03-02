@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
-import 'dart:ui'; // Nécessaire pour l'effet de flou (BackdropFilter)
+import 'dart:ui';
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -30,7 +30,6 @@ class _RegisterScreenState extends State<RegisterScreen>
   late Animation<double> _scaleAnimation;
   late Animation<Offset> _slideAnimation;
 
-  // Liste des rôles disponibles
   final List<Map<String, dynamic>> _roles = [
     {
       'value': 'ROLE_CLIENT',
@@ -50,7 +49,6 @@ class _RegisterScreenState extends State<RegisterScreen>
       'description': 'Personnel de service en salle',
       'icon': Icons.local_cafe,
     },
-
   ];
 
   @override
@@ -58,7 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     super.initState();
     _initializeAnimations();
     _testServerConnection();
-    timeDilation = 1.2; // Légèrement ralenti pour plus d'élégance
+    timeDilation = 1.2;
   }
 
   @override
@@ -92,8 +90,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     _animationController.forward();
   }
 
-  // --- Logique d'inscription ---
-
   Future<void> _testServerConnection() async {
     setState(() { 
       _serverError = ''; 
@@ -116,6 +112,34 @@ class _RegisterScreenState extends State<RegisterScreen>
           _serverError = 'Erreur réseau critique.'; 
         });
       }
+    }
+  }
+
+  Future<void> _signUpWithGoogle() async {
+    if (!_serverConnected) {
+      setState(() => _serverError = 'Connexion serveur requise pour s\'inscrire.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await context.read<AuthProvider>().signInWithGoogle();
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        _showSnackBar('Compte créé avec succès via Google', Colors.green);
+        Navigator.pushReplacementNamed(context, result['redirectRoute'] ?? '/client');
+      } else {
+        _showSnackBar(result['message'] ?? 'Échec de l\'inscription Google', Colors.redAccent);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Erreur: ${e.toString()}', Colors.redAccent);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -163,12 +187,43 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  // --- Interface Design (identique à LoginScreen) ---
+  Widget _buildGoogleSignUpButton() {
+    return Container(
+      width: double.infinity,
+      height: 54,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OutlinedButton.icon(
+        onPressed: _isLoading ? null : _signUpWithGoogle,
+        icon: Image.asset(
+          'assets/google_logo.png',
+          height: 24,
+          width: 24,
+          errorBuilder: (context, error, stackTrace) => const Icon(
+            Icons.g_mobiledata_rounded,
+            size: 30,
+            color: Colors.white,
+          ),
+        ),
+        label: const Text(
+          'S\'INSCRIRE AVEC GOOGLE',
+          style: TextStyle(
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: Colors.white.withOpacity(0.2)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F), // Noir profond organique
+      backgroundColor: const Color(0xFF0F0F0F),
       body: Stack(
         children: [
           _buildParallaxBackground(),
@@ -184,6 +239,18 @@ class _RegisterScreenState extends State<RegisterScreen>
                   const SizedBox(height: 24),
                   _buildAnimatedHeader(),
                   const SizedBox(height: 40),
+                  _buildGoogleSignUpButton(),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.white24)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Text('OU', style: TextStyle(color: Colors.white38)),
+                      ),
+                      Expanded(child: Divider(color: Colors.white24)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   _buildRegisterCard(),
                   const SizedBox(height: 30),
                 ],

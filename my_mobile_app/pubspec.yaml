@@ -11,12 +11,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  google_sign_in: ^6.2.1
 
   http: ^1.2.0
   mobile_scanner: ^7.1.3   # Remplace qr_code_scanner
   image_picker: ^1.0.4
   flutter_animate: ^4.1.1+1
   webview_flutter: ^4.8.0  # Ajoutez cette ligne
+
   url_launcher: ^6.2.1
 
   shared_preferences: ^2.2.2

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
-import 'dart:ui'; // Nécessaire pour l'effet de flou (BackdropFilter)
+import 'dart:ui';
 import '../providers/auth_provider.dart';
 import 'chef_screen.dart';
 import 'serveur_screen.dart';
@@ -38,7 +38,7 @@ class _LoginScreenState extends State<LoginScreen>
     super.initState();
     _initializeAnimations();
     _testServerConnection();
-    timeDilation = 1.2; // Légèrement ralenti pour plus d'élégance
+    timeDilation = 1.2;
   }
 
   @override
@@ -70,8 +70,6 @@ class _LoginScreenState extends State<LoginScreen>
     
     _animationController.forward();
   }
-
-  // --- Logique de connexion ---
 
   Future<void> _testServerConnection() async {
     try {
@@ -110,6 +108,39 @@ class _LoginScreenState extends State<LoginScreen>
         }
       }
     } catch (_) {}
+  }
+
+  Future<void> _signInWithGoogle() async {
+    if (!_serverConnected) {
+      setState(() => _serverError = 'Connexion serveur requise pour s\'identifier.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await context.read<AuthProvider>().signInWithGoogle();
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        _redirectToAppropriateScreen(context.read<AuthProvider>());
+      } else {
+        String errorMsg = result['message'] ?? 'Échec de la connexion Google';
+        
+        if (errorMsg.contains('popup')) {
+          errorMsg = '⚠️ La fenêtre de connexion Google a été fermée.\n\nVeuillez :\n• Autoriser les popups pour ce site\n• Désactiver votre bloqueur de publicités\n• Réessayer';
+        }
+        
+        _showSnackBar(errorMsg, Colors.redAccent);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Erreur: ${e.toString()}', Colors.redAccent);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _redirectToAppropriateScreen(AuthProvider authProvider) {
@@ -188,12 +219,43 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // --- Interface Design ---
-
+  Widget _buildGoogleSignInButton() {
+    return Container(
+      width: double.infinity,
+      height: 54,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OutlinedButton.icon(
+        onPressed: _isLoading ? null : _signInWithGoogle,
+        icon: Image.network(
+          'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
+          height: 24,
+          width: 24,
+          errorBuilder: (context, error, stackTrace) => const Icon(
+            Icons.g_mobiledata_rounded,
+            size: 30,
+            color: Colors.white,
+          ),
+        ),
+        label: const Text(
+          'CONTINUER AVEC GOOGLE',
+          style: TextStyle(
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: Colors.white.withOpacity(0.2)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F), // Noir profond organique
+      backgroundColor: const Color(0xFF0F0F0F),
       body: Stack(
         children: [
           _buildParallaxBackground(),
@@ -211,6 +273,18 @@ class _LoginScreenState extends State<LoginScreen>
                   const SizedBox(height: 40),
                   _buildQRScanButton(),
                   const SizedBox(height: 24),
+                  _buildGoogleSignInButton(),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.white24)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Text('OU', style: TextStyle(color: Colors.white38)),
+                      ),
+                      Expanded(child: Divider(color: Colors.white24)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   _buildLoginCard(),
                   const SizedBox(height: 30),
                 ],
@@ -222,6 +296,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  // ... (le reste des méthodes de build reste identique)
   Widget _buildParallaxBackground() {
     return Container(
       decoration: const BoxDecoration(
