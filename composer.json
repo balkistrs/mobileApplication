@@ -25,6 +25,10 @@
         "symfony/expression-language": "7.3.*",
         "symfony/flex": "^2",
         "symfony/framework-bundle": "7.3.*",
+        "symfony/google-mailer": "7.3.*",
+        "symfony/mailchimp-mailer": "7.3.*",
+        "symfony/mailer": "7.3.*",
+        "symfony/mailgun-mailer": "7.3.*",
         "symfony/password-hasher": "7.3.*",
         "symfony/property-access": "7.3.*",
         "symfony/property-info": "7.3.*",
@@ -34,7 +38,8 @@
         "symfony/serializer": "7.3.*",
         "symfony/twig-bundle": "7.3.*",
         "symfony/validator": "7.3.*",
-        "symfony/yaml": "7.3.*"
+        "symfony/yaml": "7.3.*",
+        "vlucas/phpdotenv": "*"
     },
     "require-dev": {
         "symfony/maker-bundle": "^1.63"

@@ -23,6 +23,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(type: 'string', length: 180, unique: true)]
     private string $email;
 
+    #[ORM\Column(type: 'datetime', nullable: true)]
+    private ?\DateTimeInterface $createdAt = null;
+
     #[ORM\Column(type: 'json')]
     private array $roles = [];
 
@@ -35,11 +38,25 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(type: 'string', length: 10, nullable: true)]
     private ?string $vote = null;
 
+    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    private ?string $googleId = null;
+
+    #[ORM\Column(type: 'string', length: 500, nullable: true)]
+    private ?string $photoUrl = null;
+
+    // NOUVEAUX CHAMPS POUR LA RÉINITIALISATION DE MOT DE PASSE
+    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    private ?string $resetToken = null;
+
+    #[ORM\Column(type: 'datetime', nullable: true)]
+    private ?\DateTimeInterface $resetTokenExpiresAt = null;
+
     #[ORM\OneToMany(mappedBy: 'user', targetEntity: Order::class, cascade: ['persist', 'remove'])]
     private Collection $orders;
 
     public function __construct()
     {
+        $this->createdAt = new \DateTime();
         $this->orders = new ArrayCollection();
     }
 
@@ -47,7 +64,6 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     {
         return $this->id;
     }
-    
 
     public function getEmail(): string
     {
@@ -113,44 +129,66 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         return $this;
     }
 
-    public function eraseCredentials(): void {}
+    public function getGoogleId(): ?string
+    {
+        return $this->googleId;
+    }
+
+    public function setGoogleId(?string $googleId): self
+    {
+        $this->googleId = $googleId;
+        return $this;
+    }
+
+    public function getPhotoUrl(): ?string
+    {
+        return $this->photoUrl;
+    }
+
+    public function setPhotoUrl(?string $photoUrl): self
+    {
+        $this->photoUrl = $photoUrl;
+        return $this;
+    }
+
+    public function getCreatedAt(): ?\DateTimeInterface
+    {
+        return $this->createdAt;
+    }
+
+    public function setCreatedAt(\DateTimeInterface $createdAt): self
+    {
+        $this->createdAt = $createdAt;
+        return $this;
+    }
 
     public function getOrders(): Collection
     {
         return $this->orders;
     }
-    // Dans src/Entity/User.php, ajoutez ces propriétés :
 
-/**
- * @ORM\Column(type="string", length=255, nullable=true)
- */
-private ?string $googleId = null;
+    // NOUVELLES MÉTHODES POUR LE TOKEN DE RÉINITIALISATION
+    public function getResetToken(): ?string
+    {
+        return $this->resetToken;
+    }
 
-/**
- * @ORM\Column(type="string", length=500, nullable=true)
- */
-private ?string $photoUrl = null;
+    public function setResetToken(?string $resetToken): self
+    {
+        $this->resetToken = $resetToken;
+        return $this;
+    }
 
-// Getters et setters
-public function getGoogleId(): ?string
-{
-    return $this->googleId;
-}
+    public function getResetTokenExpiresAt(): ?\DateTimeInterface
+    {
+        return $this->resetTokenExpiresAt;
+    }
 
-public function setGoogleId(?string $googleId): self
-{
-    $this->googleId = $googleId;
-    return $this;
-}
+    public function setResetTokenExpiresAt(?\DateTimeInterface $resetTokenExpiresAt): self
+    {
+        $this->resetTokenExpiresAt = $resetTokenExpiresAt;
+        return $this;
+    }
 
-public function getPhotoUrl(): ?string
-{
-    return $this->photoUrl;
-}
-
-public function setPhotoUrl(?string $photoUrl): self
-{
-    $this->photoUrl = $photoUrl;
-    return $this;
-}
+    public function eraseCredentials(): void {}
 }

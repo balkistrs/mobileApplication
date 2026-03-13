@@ -22,6 +22,7 @@ services:
             - '../src/DependencyInjection/'
             - '../src/Entity/'
             - '../src/Kernel.php'
+
     App\Controller\Api\ApiAuthController:
         arguments:
             $jwtManager: '@lexik_jwt_authentication.jwt_manager'
@@ -51,5 +52,7 @@ services:
     App\Command\FixUserRolesCommand:
         tags:
             - { name: 'console.command', command: 'app:fix-user-roles' }
-  
- 
+    
+    # Service MailService - version simplifiée
+    App\Service\MailService:
+        arguments: []

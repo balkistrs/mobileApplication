@@ -42,6 +42,8 @@ security:
 
         - { path: ^/api/admin, roles: ROLE_ADMIN }
         - { path: ^/api/orders, roles: [ROLE_CHEF, ROLE_CLIENT, ROLE_SERVEUR, ROLE_ADMIN] }
-      
+        - { path: ^/api/powerbi, roles: ROLE_ADMIN }
+        - { path: ^/api/forgot-password, roles: PUBLIC_ACCESS }
+        - { path: ^/api/reset-password, roles: PUBLIC_ACCESS }
         # All other API routes require JWT
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }

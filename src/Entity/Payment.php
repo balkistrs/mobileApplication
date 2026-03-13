@@ -1,62 +1,73 @@
 <?php
+// src/Entity/Payment.php
 
 namespace App\Entity;
 
+use App\Repository\PaymentRepository;
 use Doctrine\ORM\Mapping as ORM;
 
-#[ORM\Entity(repositoryClass: "App\Repository\PaymentRepository")]
+#[ORM\Entity(repositoryClass: PaymentRepository::class)]
 class Payment
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
-    #[ORM\Column(type: "integer")]
+    #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: "App\Entity\Order")]
-    #[ORM\JoinColumn(nullable: false)]
-    private ?Order $order = null;
+    #[ORM\Column]
+    private ?int $orderId = null;
 
-    #[ORM\ManyToOne(targetEntity: "App\Entity\User")]
-    #[ORM\JoinColumn(nullable: false)]
-    private ?User $client = null;
+    #[ORM\Column]
+    private ?int $clientId = null;
 
-    #[ORM\Column(type: "string", length: 50, nullable: true)]
+    #[ORM\Column(length: 50)]
     private ?string $method = null;
 
-    #[ORM\Column(type: "boolean", options: ["default" => 0])]
-    private bool $isPartial = false;
+    #[ORM\Column]
+    private ?bool $isPartial = null;
 
-    #[ORM\Column(type: "float")]
+    #[ORM\Column]
     private ?float $amount = null;
 
-    #[ORM\Column(type: "datetime_immutable")]
+    #[ORM\Column(length: 50, nullable: true)]
+    private ?string $status = null;
+
+    #[ORM\Column]
     private ?\DateTimeImmutable $createdAt = null;
 
-    // --- Getters & Setters ---
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $updatedAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $tableNumber = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $transactionId = null;
+
     public function getId(): ?int
     {
         return $this->id;
     }
 
-    public function getOrder(): ?Order
+    public function getOrderId(): ?int
     {
-        return $this->order;
+        return $this->orderId;
     }
 
-    public function setOrder(Order $order): self
+    public function setOrderId(int $orderId): static
     {
-        $this->order = $order;
+        $this->orderId = $orderId;
         return $this;
     }
 
-    public function getClient(): ?User
+    public function getClientId(): ?int
     {
-        return $this->client;
+        return $this->clientId;
     }
 
-    public function setClient(User $client): self
+    public function setClientId(int $clientId): static
     {
-        $this->client = $client;
+        $this->clientId = $clientId;
         return $this;
     }
 
@@ -65,18 +76,18 @@ class Payment
         return $this->method;
     }
 
-    public function setMethod(?string $method): self
+    public function setMethod(string $method): static
     {
         $this->method = $method;
         return $this;
     }
 
-    public function getIsPartial(): bool
+    public function isIsPartial(): ?bool
     {
         return $this->isPartial;
     }
 
-    public function setIsPartial(bool $isPartial): self
+    public function setIsPartial(bool $isPartial): static
     {
         $this->isPartial = $isPartial;
         return $this;
@@ -87,9 +98,20 @@ class Payment
         return $this->amount;
     }
 
-    public function setAmount(float $amount): self
+    public function setAmount(float $amount): static
     {
         $this->amount = $amount;
+        return $this;
+    }
+
+    public function getStatus(): ?string
+    {
+        return $this->status;
+    }
+
+    public function setStatus(?string $status): static
+    {
+        $this->status = $status;
         return $this;
     }
 
@@ -98,9 +120,42 @@ class Payment
         return $this->createdAt;
     }
 
-    public function setCreatedAt(\DateTimeImmutable $createdAt): self
+    public function setCreatedAt(\DateTimeImmutable $createdAt): static
     {
         $this->createdAt = $createdAt;
+        return $this;
+    }
+
+    public function getUpdatedAt(): ?\DateTimeImmutable
+    {
+        return $this->updatedAt;
+    }
+
+    public function setUpdatedAt(?\DateTimeImmutable $updatedAt): static
+    {
+        $this->updatedAt = $updatedAt;
+        return $this;
+    }
+
+    public function getTableNumber(): ?int
+    {
+        return $this->tableNumber;
+    }
+
+    public function setTableNumber(?int $tableNumber): static
+    {
+        $this->tableNumber = $tableNumber;
+        return $this;
+    }
+
+    public function getTransactionId(): ?string
+    {
+        return $this->transactionId;
+    }
+
+    public function setTransactionId(?string $transactionId): static
+    {
+        $this->transactionId = $transactionId;
         return $this;
     }
 }

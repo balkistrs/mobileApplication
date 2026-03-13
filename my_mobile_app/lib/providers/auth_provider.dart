@@ -23,9 +23,9 @@ class AuthProvider with ChangeNotifier {
     scopes: ['email', 'profile'],
   );
 
-  static const String baseUrl = 'https://13a4-2c0f-f698-c140-2d52-c49a-dac6-216d-2512.ngrok-free.app/api';
+static const String baseUrl = 'https://e30c-2c0f-f698-c126-5c39-88e5-5df4-3413-200.ngrok-free.app/api';
+  // ===== MÉTHODES D'AUTHENTIFICATION =====
 
-  // Méthode pour obtenir la route de redirection
   String getRedirectRoute() {
     if (isAdmin) return '/admin';
     if (isChef) return '/chef';
@@ -51,185 +51,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  // MÉTHODE GOOGLE SIGN-IN UNIFIÉE
-  Future<Map<String, dynamic>> signInWithGoogle() async {
-    _isLoading = true;
-    notifyListeners();
-
-    try {
-      debugPrint('🔐 Tentative de connexion avec Google');
-      
-      // Sign out first to ensure clean state
-      await _googleSignIn.signOut();
-      
-      // Get Google user
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      
-      if (googleUser == null) {
-        _isLoading = false;
-        notifyListeners();
-        return {
-          'success': false,
-          'message': 'Connexion annulée'
-        };
-      }
-
-      // Get authentication (required for both web and mobile)
-      await googleUser.authentication;
-      
-      // Prepare request body - ONLY what the backend needs
-      final Map<String, dynamic> requestBody = {
-        'email': googleUser.email,
-        'name': googleUser.displayName ?? googleUser.email.split('@')[0],
-        'google_id': googleUser.id,
-        'photo_url': googleUser.photoUrl,
-      };
-
-      debugPrint('📤 Envoi requête à: $baseUrl/auth/google');
-      debugPrint('📤 Body: $requestBody');
-
-      final response = await http.post(
-        Uri.parse('$baseUrl/auth/google'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-        },
-        body: json.encode(requestBody),
-      ).timeout(const Duration(seconds: 30));
-
-      debugPrint('📩 Status code: ${response.statusCode}');
-      debugPrint('📩 Response body: ${response.body}');
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = json.decode(response.body);
-        final responseData = data['data'] ?? data;
-        
-        _token = responseData['token'];
-        
-        if (_token == null) {
-          throw Exception('Token non reçu du serveur');
-        }
-        
-        // Parse user data safely
-        final userData = responseData['user'] ?? {};
-        
-        _user = AppUser(
-          id: userData['id'] ?? 0,
-          email: userData['email'] ?? googleUser.email,
-          name: userData['name'] ?? googleUser.displayName ?? googleUser.email.split('@')[0],
-          roles: _parseRoles(userData['roles']),
-          googleId: userData['google_id'] ?? googleUser.id,
-          photoUrl: userData['photo_url'] ?? googleUser.photoUrl,
-        );
-        
-        _userId = _user?.id;
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('token', _token!);
-        await prefs.setString('user', json.encode(_user!.toJson()));
-        if (_userId != null) {
-          await prefs.setInt('userId', _userId!);
-        }
-        await prefs.setBool('isGoogleUser', true);
-        
-        _isLoading = false;
-        notifyListeners();
-
-        debugPrint('✅ Utilisateur Google connecté avec rôle: ${_user?.roles}');
-        
-        return {
-          'success': true,
-          'message': 'Connexion réussie avec Google',
-          'redirectRoute': getRedirectRoute()
-        };
-      } else {
-        _isLoading = false;
-        notifyListeners();
-        
-        String errorMessage = 'Échec de l\'authentification avec le serveur';
-        try {
-          final errorData = json.decode(response.body);
-          errorMessage = errorData['error'] ?? errorData['message'] ?? errorMessage;
-          debugPrint('❌ Error from server: $errorMessage');
-        } catch (_) {}
-        
-        return {
-          'success': false,
-          'message': errorMessage
-        };
-      }
-    } catch (e) {
-      debugPrint('❌ Google Sign-In error: $e');
-      _isLoading = false;
-      notifyListeners();
-      
-      String errorMessage = 'Erreur de connexion';
-      if (e.toString().contains('popup')) {
-        errorMessage = 'La fenêtre de connexion Google a été fermée. Veuillez autoriser les popups pour ce site.';
-      } else {
-        errorMessage = 'Erreur de connexion: ${e.toString()}';
-      }
-      
-      return {
-        'success': false,
-        'message': errorMessage
-      };
-    }
-  }
-
-  // Helper method to parse roles safely
-  List<String> _parseRoles(dynamic roles) {
-    if (roles == null) {
-      debugPrint('⚠️ Aucun rôle fourni, utilisation de ROLE_CLIENT par défaut');
-      return ['ROLE_CLIENT'];
-    }
-    
-    debugPrint('📦 Parsing roles: $roles (type: ${roles.runtimeType})');
-    
-    if (roles is List) {
-      final List<String> roleList = roles.map((role) {
-        if (role is String) return role;
-        if (role is Map && role.containsKey('role')) return role['role'].toString();
-        return role.toString();
-      }).toList();
-      
-      debugPrint('✅ Roles parsed from List: $roleList');
-      return roleList.isNotEmpty ? roleList : ['ROLE_CLIENT'];
-    }
-    
-    if (roles is String) {
-      if (roles.startsWith('[') && roles.endsWith(']')) {
-        try {
-          final parsed = json.decode(roles);
-          if (parsed is List) {
-            final List<String> roleList = parsed.map((e) => e.toString()).toList();
-            debugPrint('✅ Roles parsed from JSON string: $roleList');
-            return roleList.isNotEmpty ? roleList : ['ROLE_CLIENT'];
-          }
-        } catch (e) {
-          debugPrint('⚠️ Failed to parse roles JSON: $e');
-        }
-      }
-      
-      debugPrint('✅ Single role from string: [$roles]');
-      return [roles];
-    }
-    
-    debugPrint('⚠️ Unknown roles format, using ROLE_CLIENT');
-    return ['ROLE_CLIENT'];
-  }
-
-  // MÉTHODE POUR DÉCONNEXION GOOGLE
-  Future<void> signOutGoogle() async {
-    try {
-      await _googleSignIn.signOut();
-      debugPrint('✅ Déconnexion Google réussie');
-    } catch (e) {
-      debugPrint('❌ Erreur déconnexion Google: $e');
-    }
-  }
-
   Future<Map<String, dynamic>> login(String email, String password) async {
     _isLoading = true;
     notifyListeners();
@@ -246,12 +67,8 @@ class AuthProvider with ChangeNotifier {
         body: json.encode({'email': email, 'password': password}),
       ).timeout(const Duration(seconds: 90));
 
-      debugPrint('📩 Login response status: ${response.statusCode}');
-      debugPrint('📩 Login response body: ${response.body}');
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        
         final responseData = data['data'];
         _token = responseData['token'];
         
@@ -299,8 +116,6 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      debugPrint('📨 Sending registration request: $email, role: $role');
-      
       final response = await http.post(
         Uri.parse('$baseUrl/register'),
         headers: {
@@ -314,8 +129,6 @@ class AuthProvider with ChangeNotifier {
           'role': role
         }),
       ).timeout(const Duration(seconds: 30));
-
-      debugPrint('📩 Register response: ${response.statusCode} ${response.body}');
 
       _isLoading = false;
       notifyListeners();
@@ -368,6 +181,224 @@ class AuthProvider with ChangeNotifier {
       return {'success': false, 'message': errorMessage};
     }
   }
+
+  // ===== NOUVELLE MÉTHODE MOT DE PASSE OUBLIÉ =====
+  Future<Map<String, dynamic>> forgotPassword(String email) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      debugPrint('📧 Envoi demande réinitialisation pour: $email');
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/forgot-password'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({'email': email}),
+      ).timeout(const Duration(seconds: 30));
+
+      _isLoading = false;
+      notifyListeners();
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['data']?['message'] ?? 'Email de réinitialisation envoyé',
+        };
+      } else {
+        String errorMessage = 'Erreur serveur: ${response.statusCode}';
+        try {
+          final errorData = json.decode(response.body);
+          errorMessage = errorData['error'] ?? errorData['message'] ?? errorMessage;
+        } catch (_) {}
+        
+        return {
+          'success': false,
+          'message': errorMessage,
+        };
+      }
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('❌ Forgot password error: $e');
+      
+      return {
+        'success': false,
+        'message': 'Erreur de connexion: ${e.toString()}',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> resetPassword(String token, String newPassword) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/reset-password'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({
+          'token': token,
+          'password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      _isLoading = false;
+      notifyListeners();
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['data']?['message'] ?? 'Mot de passe réinitialisé avec succès',
+        };
+      } else {
+        String errorMessage = 'Erreur serveur: ${response.statusCode}';
+        try {
+          final errorData = json.decode(response.body);
+          errorMessage = errorData['error'] ?? errorData['message'] ?? errorMessage;
+        } catch (_) {}
+        
+        return {
+          'success': false,
+          'message': errorMessage,
+        };
+      }
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('❌ Reset password error: $e');
+      
+      return {
+        'success': false,
+        'message': 'Erreur de connexion: ${e.toString()}',
+      };
+    }
+  }
+
+  // ===== MÉTHODE GOOGLE SIGN-IN =====
+
+  Future<Map<String, dynamic>> signInWithGoogle() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      debugPrint('🔐 Tentative de connexion avec Google');
+      
+      await _googleSignIn.signOut();
+      
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        _isLoading = false;
+        notifyListeners();
+        return {'success': false, 'message': 'Connexion annulée'};
+      }
+
+      await googleUser.authentication;
+      
+      final Map<String, dynamic> requestBody = {
+        'email': googleUser.email,
+        'name': googleUser.displayName ?? googleUser.email.split('@')[0],
+        'google_id': googleUser.id,
+        'photo_url': googleUser.photoUrl,
+      };
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/google'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode(requestBody),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(response.body);
+        final responseData = data['data'] ?? data;
+        
+        _token = responseData['token'];
+        
+        if (_token == null) {
+          throw Exception('Token non reçu du serveur');
+        }
+        
+        final userData = responseData['user'] ?? {};
+        
+        _user = AppUser(
+          id: userData['id'] ?? 0,
+          email: userData['email'] ?? googleUser.email,
+          name: userData['name'] ?? googleUser.displayName ?? googleUser.email.split('@')[0],
+          roles: _parseRoles(userData['roles']),
+          googleId: userData['google_id'] ?? googleUser.id,
+          photoUrl: userData['photo_url'] ?? googleUser.photoUrl,
+        );
+        
+        _userId = _user?.id;
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', _token!);
+        await prefs.setString('user', json.encode(_user!.toJson()));
+        if (_userId != null) {
+          await prefs.setInt('userId', _userId!);
+        }
+        await prefs.setBool('isGoogleUser', true);
+        
+        _isLoading = false;
+        notifyListeners();
+
+        return {
+          'success': true,
+          'message': 'Connexion réussie avec Google',
+          'redirectRoute': getRedirectRoute()
+        };
+      } else {
+        _isLoading = false;
+        notifyListeners();
+        
+        String errorMessage = 'Échec de l\'authentification avec le serveur';
+        try {
+          final errorData = json.decode(response.body);
+          errorMessage = errorData['error'] ?? errorData['message'] ?? errorMessage;
+        } catch (_) {}
+        
+        return {'success': false, 'message': errorMessage};
+      }
+    } catch (e) {
+      debugPrint('❌ Google Sign-In error: $e');
+      _isLoading = false;
+      notifyListeners();
+      
+      String errorMessage = 'Erreur de connexion';
+      if (e.toString().contains('popup')) {
+        errorMessage = 'La fenêtre de connexion Google a été fermée. Veuillez autoriser les popups pour ce site.';
+      } else {
+        errorMessage = 'Erreur de connexion: ${e.toString()}';
+      }
+      
+      return {'success': false, 'message': errorMessage};
+    }
+  }
+
+  Future<void> signOutGoogle() async {
+    try {
+      await _googleSignIn.signOut();
+      debugPrint('✅ Déconnexion Google réussie');
+    } catch (e) {
+      debugPrint('❌ Erreur déconnexion Google: $e');
+    }
+  }
+
+  // ===== MÉTHODES DE RÉCUPÉRATION DE DONNÉES =====
 
   Future<List<AppUser>> getUsers() async {
     try {
@@ -500,111 +531,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  Future<bool> submitOrderRating(int orderId, int rating) async {
-    try {
-      if (_token == null) {
-        debugPrint('❌ No token available for rating submission');
-        return false;
-      }
-
-      debugPrint('⭐ Soumission évaluation pour commande #$orderId: $rating étoiles');
-      
-      try {
-        final response = await http.post(
-          Uri.parse('$baseUrl/orders/$orderId/rating'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $_token',
-            'Accept': 'application/json',
-            'ngrok-skip-browser-warning': 'true',
-          },
-          body: json.encode({'rating': rating}),
-        ).timeout(const Duration(seconds: 10));
-
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          debugPrint('✅ Évaluation soumise avec succès');
-          await _saveRatingLocally(orderId, rating);
-          return true;
-        } else {
-          debugPrint('❌ Échec de soumission évaluation: ${response.statusCode}');
-          await _saveRatingLocally(orderId, rating);
-          return true;
-        }
-      } catch (e) {
-        debugPrint('❌ Rating submission error: $e');
-        await _saveRatingLocally(orderId, rating);
-        return true;
-      }
-    } catch (e) {
-      debugPrint('❌ Global rating error: $e');
-      return false;
-    }
-  }
-
-  Future<void> _saveRatingLocally(int orderId, int rating) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
-      final existingRatings = prefs.getString(ratingsKey) ?? '{}';
-      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
-      
-      ratingsMap[orderId.toString()] = {
-        'rating': rating,
-        'date': DateTime.now().toIso8601String(),
-      };
-      
-      await prefs.setString(ratingsKey, json.encode(ratingsMap));
-      debugPrint('✅ Évaluation sauvegardée localement pour la commande #$orderId');
-    } catch (e) {
-      debugPrint('❌ Erreur sauvegarde locale évaluation: $e');
-    }
-  }
-
-  Future<int?> getOrderRatingLocally(int orderId) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
-      final existingRatings = prefs.getString(ratingsKey);
-      
-      if (existingRatings == null) return null;
-      
-      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
-      if (ratingsMap.containsKey(orderId.toString())) {
-        return ratingsMap[orderId.toString()]['rating'];
-      }
-      return null;
-    } catch (e) {
-      debugPrint('❌ Erreur récupération évaluation locale: $e');
-      return null;
-    }
-  }
-
-  Future<Map<int, int>> getAllLocalRatings() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
-      final existingRatings = prefs.getString(ratingsKey);
-      
-      if (existingRatings == null) return {};
-      
-      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
-      final Map<int, int> result = {};
-      
-      ratingsMap.forEach((key, value) {
-        final orderId = int.tryParse(key);
-        final rating = value['rating'];
-        if (orderId != null && rating != null) {
-          result[orderId] = rating;
-        }
-      });
-      
-      return result;
-    } catch (e) {
-      debugPrint('❌ Erreur chargement évaluations locales: $e');
-      return {};
-    }
-  }
-
   Future<List<Map<String, dynamic>>> getUserNotifications() async {
     try {
       final response = await http.get(
@@ -618,8 +544,7 @@ class AuthProvider with ChangeNotifier {
       ).timeout(const Duration(seconds: 10));
 
       final responseBody = response.body.trim();
-      if (responseBody.startsWith('<!DOCTYPE') || 
-          responseBody.startsWith('<html')) {
+      if (responseBody.startsWith('<!DOCTYPE') || responseBody.startsWith('<html')) {
         return [];
       }
 
@@ -737,47 +662,66 @@ class AuthProvider with ChangeNotifier {
       return false;
     }
   }
+// Dans auth_provider.dart - méthode updateUser
 
-  Future<bool> updateUser(String email, String newEmail, String newName, String? role) async {
-    try {
-      final encodedEmail = Uri.encodeComponent(email);
-      final body = {
-        'email': newEmail,
-        'name': newName,
-      };
-      if (role != null && role.isNotEmpty && hasRole('ROLE_ADMIN')) {
-        body['role'] = role;
-      }
+Future<bool> updateUser(String email, String newEmail, String newName, String? role) async {
+  try {
+    // Encoder l'email pour l'URL
+    final encodedEmail = Uri.encodeComponent(email);
+    
+    final body = {
+      'name': newName,
+      'email': newEmail,
+    };
 
-      final response = await http.put(
-        Uri.parse('$baseUrl/users/$encodedEmail'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_token',
-          'ngrok-skip-browser-warning': 'true',
-        },
-        body: json.encode(body),
-      ).timeout(const Duration(seconds: 10));
+    debugPrint('🔄 Mise à jour utilisateur: $encodedEmail');
+    debugPrint('📦 Body: $body');
 
-      if (response.statusCode == 200) {
-        try {
-          final data = json.decode(response.body);
-          final updatedUser = AppUser.fromJson(data['data']?['user'] ?? {});
-          if (updatedUser.id > 0) {
+    final response = await http.put(
+      Uri.parse('${AuthProvider.baseUrl}/users/$encodedEmail'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_token',
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: json.encode(body),
+    ).timeout(const Duration(seconds: 15));
+
+    debugPrint('📩 Response status: ${response.statusCode}');
+    debugPrint('📩 Response body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        if (data['data']['user'] != null) {
+          final updatedUser = AppUser.fromJson(data['data']['user']);
+          if (updatedUser.id == _user?.id) {
             _user = updatedUser;
+            _userId = updatedUser.id;
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('user', json.encode(_user!.toJson()));
             notifyListeners();
           }
-        } catch (_) {}
+        }
+        debugPrint('✅ Utilisateur mis à jour avec succès');
         return true;
+      } else {
+        debugPrint('❌ Erreur: ${data['error']}');
+        return false;
       }
+    } else if (response.statusCode == 404) {
+      debugPrint('❌ Route non trouvée (404)');
       return false;
-    } catch (e) {
-      debugPrint('Update user error: $e');
+    } else {
+      debugPrint('❌ HTTP Error: ${response.statusCode}');
       return false;
     }
+  } catch (e) {
+    debugPrint('❌ Update user error: $e');
+    return false;
   }
+}
 
   Future<bool> deleteUser(String email) async {
     try {
@@ -831,29 +775,149 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  String getStatusText(String status) {
-    switch (status) {
-      case 'paid': return 'Payée';
-      case 'pending': return 'En attente';
-      case 'cancelled': return 'Annulée';
-      case 'completed': return 'Terminée';
-      case 'en attente': return 'En attente';
-      case 'payée': return 'Payée';
-      case 'annulée': return 'Annulée';
-      case 'terminée': return 'Terminée';
-      default: return status;
+  Future<bool> submitOrderRating(int orderId, int rating) async {
+    try {
+      if (_token == null) {
+        debugPrint('❌ No token available for rating submission');
+        return false;
+      }
+
+      debugPrint('⭐ Soumission évaluation pour commande #$orderId: $rating étoiles');
+      
+      try {
+        final response = await http.post(
+          Uri.parse('$baseUrl/orders/$orderId/rating'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $_token',
+            'Accept': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body: json.encode({'rating': rating}),
+        ).timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          debugPrint('✅ Évaluation soumise avec succès');
+          await _saveRatingLocally(orderId, rating);
+          return true;
+        } else {
+          debugPrint('❌ Échec de soumission évaluation: ${response.statusCode}');
+          await _saveRatingLocally(orderId, rating);
+          return true;
+        }
+      } catch (e) {
+        debugPrint('❌ Rating submission error: $e');
+        await _saveRatingLocally(orderId, rating);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('❌ Global rating error: $e');
+      return false;
     }
   }
 
-  String _convertStatusToEnglish(String frenchStatus) {
-    switch (frenchStatus.toLowerCase()) {
-      case 'en attente': return 'pending';
-      case 'payée': return 'paid';
-      case 'annulée': return 'cancelled';
-      case 'terminée': return 'completed';
-      default: return frenchStatus;
+  Future<void> _saveRatingLocally(int orderId, int rating) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
+      final existingRatings = prefs.getString(ratingsKey) ?? '{}';
+      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
+      
+      ratingsMap[orderId.toString()] = {
+        'rating': rating,
+        'date': DateTime.now().toIso8601String(),
+      };
+      
+      await prefs.setString(ratingsKey, json.encode(ratingsMap));
+      debugPrint('✅ Évaluation sauvegardée localement pour la commande #$orderId');
+    } catch (e) {
+      debugPrint('❌ Erreur sauvegarde locale évaluation: $e');
     }
   }
+
+  Future<int?> getOrderRatingLocally(int orderId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
+      final existingRatings = prefs.getString(ratingsKey);
+      
+      if (existingRatings == null) return null;
+      
+      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
+      if (ratingsMap.containsKey(orderId.toString())) {
+        return ratingsMap[orderId.toString()]['rating'];
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Erreur récupération évaluation locale: $e');
+      return null;
+    }
+  }
+
+  Future<Map<int, int>> getAllLocalRatings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ratingsKey = 'order_ratings_${_user?.id ?? 'guest'}';
+      final existingRatings = prefs.getString(ratingsKey);
+      
+      if (existingRatings == null) return {};
+      
+      final Map<String, dynamic> ratingsMap = json.decode(existingRatings);
+      final Map<int, int> result = {};
+      
+      ratingsMap.forEach((key, value) {
+        final orderId = int.tryParse(key);
+        final rating = value['rating'];
+        if (orderId != null && rating != null) {
+          result[orderId] = rating;
+        }
+      });
+      
+      return result;
+    } catch (e) {
+      debugPrint('❌ Erreur chargement évaluations locales: $e');
+      return {};
+    }
+  }
+
+  Future<bool> submitVote(int stars) async {
+    try {
+      if (_token == null) return false;
+
+      final response = await http.put(
+        Uri.parse('$baseUrl/users/${_user?.email}/vote'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: json.encode({'vote': stars.toString()}),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        if (_user != null) {
+          _user = AppUser(
+            id: _user!.id,
+            email: _user!.email,
+            name: _user!.name,
+            roles: _user!.roles,
+            vote: stars.toString(),
+          );
+          notifyListeners();
+          
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_vote', stars.toString());
+        }
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('❌ Vote submission error: $e');
+      return false;
+    }
+  }
+
+  // ===== MÉTHODES DE GESTION DE SESSION =====
 
   Future<void> tryAutoLogin() async {
     try {
@@ -887,6 +951,43 @@ class AuthProvider with ChangeNotifier {
     await prefs.remove('isGoogleUser');
     
     notifyListeners();
+  }
+
+  // ===== MÉTHODES UTILITAIRES =====
+
+  List<String> _parseRoles(dynamic roles) {
+    if (roles == null) {
+      debugPrint('⚠️ Aucun rôle fourni, utilisation de ROLE_CLIENT par défaut');
+      return ['ROLE_CLIENT'];
+    }
+    
+    if (roles is List) {
+      final List<String> roleList = roles.map((role) {
+        if (role is String) return role;
+        if (role is Map && role.containsKey('role')) return role['role'].toString();
+        return role.toString();
+      }).toList();
+      
+      return roleList.isNotEmpty ? roleList : ['ROLE_CLIENT'];
+    }
+    
+    if (roles is String) {
+      if (roles.startsWith('[') && roles.endsWith(']')) {
+        try {
+          final parsed = json.decode(roles);
+          if (parsed is List) {
+            final List<String> roleList = parsed.map((e) => e.toString()).toList();
+            return roleList.isNotEmpty ? roleList : ['ROLE_CLIENT'];
+          }
+        } catch (e) {
+          debugPrint('⚠️ Failed to parse roles JSON: $e');
+        }
+      }
+      
+      return [roles];
+    }
+    
+    return ['ROLE_CLIENT'];
   }
 
   Map<String, dynamic> parseJwt(String token) {
@@ -982,42 +1083,31 @@ class AuthProvider with ChangeNotifier {
     return false;
   }
 
-  Future<bool> submitVote(int stars) async {
-    try {
-      if (_token == null) return false;
-
-      final response = await http.put(
-        Uri.parse('$baseUrl/users/${_user?.email}/vote'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_token',
-          'ngrok-skip-browser-warning': 'true',
-        },
-        body: json.encode({'vote': stars.toString()}),
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        if (_user != null) {
-          _user = AppUser(
-            id: _user!.id,
-            email: _user!.email,
-            name: _user!.name,
-            roles: _user!.roles,
-            vote: stars.toString(),
-          );
-          notifyListeners();
-          
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('user_vote', stars.toString());
-        }
-        return true;
-      }
-      return false;
-    } catch (e) {
-      debugPrint('❌ Vote submission error: $e');
-      return false;
+  String getStatusText(String status) {
+    switch (status) {
+      case 'paid': return 'Payée';
+      case 'pending': return 'En attente';
+      case 'cancelled': return 'Annulée';
+      case 'completed': return 'Terminée';
+      case 'en attente': return 'En attente';
+      case 'payée': return 'Payée';
+      case 'annulée': return 'Annulée';
+      case 'terminée': return 'Terminée';
+      default: return status;
     }
   }
+
+  String _convertStatusToEnglish(String frenchStatus) {
+    switch (frenchStatus.toLowerCase()) {
+      case 'en attente': return 'pending';
+      case 'payée': return 'paid';
+      case 'annulée': return 'cancelled';
+      case 'terminée': return 'completed';
+      default: return frenchStatus;
+    }
+  }
+
+  // ===== GETTERS =====
 
   bool get isAdmin => hasRole('ROLE_ADMIN');
   bool get isChef => hasRole('ROLE_CHEF');

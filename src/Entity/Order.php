@@ -1,4 +1,5 @@
 <?php
+// src/Entity/Order.php
 
 namespace App\Entity;
 
@@ -11,7 +12,6 @@ use Symfony\Component\Serializer\Annotation\Groups;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: OrderRepository::class)]
-// Use a non-reserved table name to avoid SQL quoting issues
 #[ORM\Table(name: 'orders', indexes: [
     new ORM\Index(name: 'idx_order_status', columns: ['status']),
     new ORM\Index(name: 'idx_order_created', columns: ['created_at'])
@@ -83,6 +83,15 @@ class Order
 
     #[ORM\OneToOne(mappedBy: 'order', targetEntity: Invoice::class)]
     private ?Invoice $invoice = null;
+
+    // NOUVELLES PROPRIÉTÉS AJOUTÉES
+    #[ORM\Column(nullable: true)]
+    #[Groups(['order:read', 'order:write'])]
+    private ?int $tableNumber = null;
+
+    #[ORM\Column(nullable: true)]
+    #[Groups(['order:read', 'order:write'])]
+    private ?string $paymentMethod = null;
 
     public function __construct()
     {
@@ -247,5 +256,28 @@ class Order
     public static function getStatusTexts(): array
     {
         return self::$statusTexts;
+    }
+
+    // NOUVELLES MÉTHODES AJOUTÉES
+    public function getTableNumber(): ?int
+    {
+        return $this->tableNumber;
+    }
+
+    public function setTableNumber(?int $tableNumber): self
+    {
+        $this->tableNumber = $tableNumber;
+        return $this;
+    }
+
+    public function getPaymentMethod(): ?string
+    {
+        return $this->paymentMethod;
+    }
+
+    public function setPaymentMethod(?string $paymentMethod): self
+    {
+        $this->paymentMethod = $paymentMethod;
+        return $this;
     }
 }

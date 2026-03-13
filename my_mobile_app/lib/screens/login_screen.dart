@@ -9,6 +9,7 @@ import 'restaurant_screen.dart';
 import 'admin_screen.dart';
 import 'register_screen.dart';
 import 'qr_scanner_wrapper.dart';
+import 'forgot_password_screen.dart'; // IMPORTANT: Ajoutez cet import
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -98,18 +99,22 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _tryAutoLogin() async {
-    try {
-      await context.read<AuthProvider>().tryAutoLogin();
-      if (mounted) {
-        final authProvider = context.read<AuthProvider>();
-        if (authProvider.isAuth) {
-          _redirectToAppropriateScreen(authProvider);
-        }
+// Remplacer la méthode _tryAutoLogin
+Future<void> _tryAutoLogin() async {
+  try {
+    await context.read<AuthProvider>().tryAutoLogin();
+    if (mounted) {
+      final authProvider = context.read<AuthProvider>();
+      if (authProvider.isAuth) {
+        // NE PAS REDIRIGER AUTOMATIQUEMENT
+        // On laisse l'utilisateur sur la page de login
+        // Il pourra se connecter manuellement
+        debugPrint('✅ Session trouvée, mais attente de connexion manuelle');
       }
-    } catch (_) {}
-  }
-
+    }
+  } catch (_) {}
+}
+ 
   Future<void> _signInWithGoogle() async {
     if (!_serverConnected) {
       setState(() => _serverError = 'Connexion serveur requise pour s\'identifier.');
@@ -296,7 +301,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ... (le reste des méthodes de build reste identique)
   Widget _buildParallaxBackground() {
     return Container(
       decoration: const BoxDecoration(
@@ -421,7 +425,29 @@ class _LoginScreenState extends State<LoginScreen>
                   _buildEmailField(),
                   const SizedBox(height: 16),
                   _buildPasswordField(),
-                  const SizedBox(height: 32),
+                  
+                  // Lien "Mot de passe oublié" AJOUTÉ ICI (correction)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                        );
+                      },
+                      child: Text(
+                        'Mot de passe oublié?',
+                        style: TextStyle(
+                          color: Colors.amber.withOpacity(0.8),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
                   _buildLoginButton(),
                   const SizedBox(height: 20),
                   _buildRegisterSection(),
