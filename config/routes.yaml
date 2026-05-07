@@ -1,0 +1,8 @@
+# config/routes.yaml
+controllers:
+    resource: '../src/Controller/'
+    type: attribute
+api_orders_status:
+  path: /api/orders/{id}/status
+  controller: App\Controller\OrderController::updateStatus
+  methods: [PUT, PATCH] 

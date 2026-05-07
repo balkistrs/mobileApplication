@@ -1,4 +1,8 @@
 {
+<<<<<<< HEAD
     "liveServer.settings.port": 5501,
     "java.configuration.updateBuildConfiguration": "interactive"
+=======
+    "liveServer.settings.port": 5501
+>>>>>>> 9aa5f6a271cc53251d5eb74a927d0f76fec6c3c4
 }

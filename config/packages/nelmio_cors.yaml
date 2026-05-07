@@ -1,0 +1,18 @@
+nelmio_cors:
+    defaults:
+        origin_regex: true
+        allow_origin: ['*']
+        allow_methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+        allow_headers: ['*', 'ngrok-skip-browser-warning'] # Ajouter ce header
+        expose_headers: ['Link']
+        max_age: 3600
+        allow_credentials: true
+
+    paths:
+        '^/api/':
+            allow_origin: ['*']
+            allow_headers: ['*']
+            allow_methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+            expose_headers: ['Link']
+            max_age: 3600
+            allow_credentials: true
