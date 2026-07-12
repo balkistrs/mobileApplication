@@ -14,9 +14,7 @@
 ![Status](https://img.shields.io/badge/Status-Completed-brightgreen?style=for-the-badge)
 ![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=for-the-badge)
 
-<p align="center">
-  <img src="assets/logo.png" alt="Smart Resto IA Logo" width="200">
-</p>
+
 
 <h1 align="center">🍽️ Smart Resto IA</h1>
 
