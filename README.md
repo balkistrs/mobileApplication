@@ -232,7 +232,7 @@ flutter build apk --release
 bash
 ngrok http 8000
 # URL générée: https://abc123.ngrok.io
-📊 Performances
+### 📊 Performances
 Métrique	Valeur	Objectif
 Temps de réponse API	< 200ms	Excellent
 Précision IA (humeur)	85%	Très bon
