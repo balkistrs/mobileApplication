@@ -188,9 +188,7 @@
 | MySQL | 8.0+ |
 | Node.js | 16+ |
 
-### Étapes d'Installation
 
-#### 1. Cloner le Projet
 
 ```bash
 git clone https://github.com/balkistrs/smart-resto-ia.git
