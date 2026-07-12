@@ -232,33 +232,58 @@ flutter build apk --release
 bash
 ngrok http 8000
 # URL générée: https://abc123.ngrok.io
-### 📊 Performances
-Métrique	Valeur	Objectif
-Temps de réponse API	< 200ms	Excellent
-Précision IA (humeur)	85%	Très bon
-Taux de satisfaction	92%	Excellent
-Disponibilité	99.9%	Excellent
-🔒 Sécurité
-Type	Mesure
-Authentification	JWT
-Autorisation	RBAC
-Données	SSL/TLS
-Mots de passe	BCrypt
-API	Rate Limiting
-Base de données	Requêtes préparées
-📈 Évolutions Futures
-Version	Fonctionnalités	Date
-v2.0	✅ Version actuelle	Juillet 2026
-v2.1	Interface restaurant web	Août 2026
-v2.2	Notifications push	Septembre 2026
-v2.3	Amélioration IA	Octobre 2026
-v3.0	IA prédictive	Janvier 2027
+---
+##
+## 📊 Performances
 
-👨‍💻 Équipe
-Rôle	Nom	Contributions
-Chef de Projet	Balkis	Architecture, Coordination
-Backend Symfony	Balkis	API, Authentification, Logique métier
-Application Flutter	Balkis	UI/UX, Services, State Management
-Services IA	Balkis	Détection d'humeur, Recommandations, Chatbot
-Metabase	Balkis	Dashboards, Requêtes, Visualisations
-Base de Données	Balkis	Schéma, Optimisation, Requêtes
+| Métrique | Valeur | Objectif |
+|----------|--------|----------|
+| **Temps de réponse API** | < 200ms | Excellent |
+| **Précision IA (humeur)** | 85% | Très bon |
+| **Taux de satisfaction** | 92% | Excellent |
+| **Disponibilité** | 99.9% | Excellent |
+| **Utilisateurs actifs** | 500+ | En croissance |
+| **Commandes/jour** | 150+ | En croissance |
+
+---
+
+## 🔒 Sécurité
+
+| Type | Mesure |
+|------|--------|
+| **Authentification** | JWT (JSON Web Tokens) |
+| **Autorisation** | RBAC (Role-Based Access Control) |
+| **Données** | SSL/TLS |
+| **Mots de passe** | BCrypt |
+| **API** | Rate Limiting |
+| **Base de données** | Requêtes préparées |
+| **Audit** | Logs d'activité |
+
+---
+
+## 📈 Évolutions Futures
+
+| Version | Fonctionnalités | Date |
+|---------|-----------------|------|
+| **v2.0** | ✅ Version actuelle | Juillet 2026 |
+| **v2.1** | 👨‍🍳 Interface restaurant web | Août 2026 |
+| **v2.2** | 📱 Notifications push | Septembre 2026 |
+| **v2.3** | 🤖 Amélioration IA (plus d'émotions) | Octobre 2026 |
+| **v3.0** | 🌐 Site web de gestion | Novembre 2026 |
+| **v3.1** | 📊 IA prédictive (prévisions) | Janvier 2027 |
+| **v3.2** | 🎯 Marketing automation | Mars 2027 |
+| **v4.0** | 🏪 Multi-restaurants | Juin 2027 |
+
+---
+
+## 👨‍💻 Équipe
+
+| Rôle | Nom | Contributions |
+|------|-----|---------------|
+| **Chef de Projet** | Balkis | Architecture, Coordination, Planning |
+| **Backend Symfony** | Balkis | API REST, Authentification JWT, Logique métier |
+| **Application Flutter** | Balkis | UI/UX, Services, State Management |
+| **Services IA** | Balkis | Détection d'humeur, Recommandations, Chatbot |
+| **Metabase** | Balkis | Dashboards, Requêtes SQL, Visualisations |
+| **Base de Données** | Balkis | Schéma, Optimisation, Requêtes |
+| **DevOps** | Balkis | Déploiement, Ngrok, CI/CD |
