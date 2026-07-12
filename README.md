@@ -188,50 +188,6 @@
 | MySQL | 8.0+ |
 | Node.js | 16+ |
 
-
-
-```bash
-git clone https://github.com/balkistrs/smart-resto-ia.git
-cd smart-resto-ia
-
-2. Backend Symfony
-bash
-composer install
-cp .env.example .env
-# Modifier DATABASE_URL dans .env
-php bin/console doctrine:database:create
-php bin/console doctrine:migrations:migrate
-php bin/console doctrine:fixtures:load
-php -S localhost:8000 -t public
-
-3. Services IA (Python)
-bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# ou
-venv\Scripts\activate     # Windows
-pip install -r requirements.txt
-python download_model.py
-python emotion_detection_service.py
-python recommendation_service.py
-python chatbot_service.py
-4. Metabase
-bash
-wget https://downloads.metabase.com/v0.46/metabase.jar
-java -jar metabase.jar
-# Accéder à http://localhost:3000
-5. Application Flutter
-bash
-cd mobile
-flutter pub get
-flutter run
-flutter build apk --release
-6. Ngrok
-bash
-ngrok http 8000
-# URL générée: https://abc123.ngrok.io
----
-##
 ## 📊 Performances
 
 | Métrique | Valeur | Objectif |
@@ -285,3 +241,47 @@ ngrok http 8000
 | **Metabase** | Balkis | Dashboards, Requêtes SQL, Visualisations |
 | **Base de Données** | Balkis | Schéma, Optimisation, Requêtes |
 | **DevOps** | Balkis | Déploiement, Ngrok, CI/CD |
+
+
+```bash
+git clone https://github.com/balkistrs/smart-resto-ia.git
+cd smart-resto-ia
+
+2. Backend Symfony
+bash
+composer install
+cp .env.example .env
+# Modifier DATABASE_URL dans .env
+php bin/console doctrine:database:create
+php bin/console doctrine:migrations:migrate
+php bin/console doctrine:fixtures:load
+php -S localhost:8000 -t public
+
+3. Services IA (Python)
+bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# ou
+venv\Scripts\activate     # Windows
+pip install -r requirements.txt
+python download_model.py
+python emotion_detection_service.py
+python recommendation_service.py
+python chatbot_service.py
+4. Metabase
+bash
+wget https://downloads.metabase.com/v0.46/metabase.jar
+java -jar metabase.jar
+# Accéder à http://localhost:3000
+5. Application Flutter
+bash
+cd mobile
+flutter pub get
+flutter run
+flutter build apk --release
+6. Ngrok
+bash
+ngrok http 8000
+# URL générée: https://abc123.ngrok.io
+---
+##
